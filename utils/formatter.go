@@ -13,6 +13,7 @@ type (
 	Pool         = bigip.Pool
 	Node         = bigip.Node
 	WAFPolicy    = bigip.WAFPolicy
+	SignatureStatus = bigip.SignatureStatus
 )
 
 func FormatVirtualServers(vs []VirtualServer) string {
@@ -102,6 +103,7 @@ func FormatNodes(nodes []Node) string {
 func FormatWAFPolicies(policies []*WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
+	sb.WriteString("Reference: iControl REST API v14.1.0\n")
 	
 	if len(policies) == 0 {
 		sb.WriteString("\nNo WAF policies are currently configured on this BIG-IP system.\n")
@@ -123,7 +125,6 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 		sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
 		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
 		
-		// Display Virtual Server associations prominently
 		if len(policy.VirtualServers) > 0 {
 			sb.WriteString("\nApplied to Virtual Servers:\n")
 			for _, vs := range policy.VirtualServers {
@@ -175,35 +176,145 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 	return sb.String()
 }
 
-func FormatWAFPolicyDetails(policy *bigip.WAFPolicy) string {
+func FormatWAFPolicyDetails(policy *WAFPolicy) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n=== WAF Policy Details: %s ===\n", policy.Name))
+	sb.WriteString("\n=== WAF (Web Application Firewall) Policy Details ===\n")
+	sb.WriteString("Reference: iControl REST API v14.1.0, Chapter 7: Application Security Management\n")
 	sb.WriteString("----------------------------------------\n")
 	
-	sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
-	sb.WriteString(fmt.Sprintf("ID: %s\n", policy.ID))
-	sb.WriteString(fmt.Sprintf("Type: %s\n", policy.Type))
-	sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
-	sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
+	// Basic Information with Improved Formatting
+	sb.WriteString("BASIC INFORMATION:\n")
+	sb.WriteString(fmt.Sprintf("• Name: %s\n", policy.Name))
+	sb.WriteString(fmt.Sprintf("• Full Path: %s\n", policy.FullPath))
+	sb.WriteString(fmt.Sprintf("• ID: %s\n", policy.ID))
 	
-	if policy.Description != "" {
-		sb.WriteString(fmt.Sprintf("Description: %s\n", policy.Description))
+	// Policy Status and Type with Enhanced Details
+	sb.WriteString("\nSTATUS AND CONFIGURATION:\n")
+	sb.WriteString(fmt.Sprintf("• Active: %s\n", map[bool]string{true: "Yes (Policy is enforcing security rules)", 
+		false: "No (Policy is inactive)"}[policy.Active]))
+	if policy.Type != "" {
+		sb.WriteString(fmt.Sprintf("• Type: %s\n", policy.Type))
 	}
 	
-	if policy.SignatureStaging {
-		sb.WriteString("Signature Mode: Staging\n")
-	} else {
-		sb.WriteString("Signature Mode: Production\n")
-	}
-	
-	if len(policy.VirtualServers) > 0 {
-		sb.WriteString("\nAssociated Virtual Servers:\n")
-		for _, vs := range policy.VirtualServers {
-			sb.WriteString(fmt.Sprintf("- %s\n", vs))
+	// Enforcement Configuration
+	sb.WriteString("\nENFORCEMENT SETTINGS:\n")
+	if policy.EnforcementMode != "" {
+		sb.WriteString(fmt.Sprintf("• Mode: %s\n", policy.EnforcementMode))
+		switch policy.EnforcementMode {
+		case "blocking":
+			sb.WriteString("  ↳ Policy is actively preventing detected violations\n")
+			sb.WriteString("  ↳ Malicious requests are blocked in real-time\n")
+		case "transparent":
+			sb.WriteString("  ↳ Policy is in monitoring/learning mode\n")
+			sb.WriteString("  ↳ Violations are logged but not blocked\n")
 		}
 	}
 	
-	sb.WriteString("\nConfiguration Path: " + policy.FullPath + "\n")
+	// Signature Configuration with Detailed Explanation
+	sb.WriteString("\nSIGNATURE SETTINGS:\n")
+	sb.WriteString(fmt.Sprintf("• Staging: %s\n", map[bool]string{
+		true:  "Enabled - New signatures are in staging mode",
+		false: "Disabled - All signatures are in production",
+	}[policy.SignatureStaging]))
+	if policy.SignatureStaging {
+		sb.WriteString("  ↳ New attack signatures are monitored without blocking\n")
+		sb.WriteString("  ↳ Helps prevent false positives with new signatures\n")
+	}
+	if policy.BlockingMode != "" {
+		sb.WriteString(fmt.Sprintf("• Blocking Mode: %s\n", policy.BlockingMode))
+	}
 	
+	// Virtual Server Associations with Status
+	sb.WriteString("\nVIRTUAL SERVER ASSOCIATIONS:\n")
+	if len(policy.VirtualServers) > 0 {
+		for _, vs := range policy.VirtualServers {
+			sb.WriteString(fmt.Sprintf("• %s\n", vs))
+		}
+		sb.WriteString("\nNote: This policy is actively protecting the above virtual servers\n")
+	} else {
+		sb.WriteString("• Not currently applied to any Virtual Servers\n")
+		sb.WriteString("Note: Policy is configured but not actively protecting any services\n")
+	}
+	
+	// Additional Information
+	if policy.Description != "" {
+		sb.WriteString("\nDESCRIPTION:\n")
+		sb.WriteString(fmt.Sprintf("%s\n", policy.Description))
+	}
+	
+	// API Information
+	sb.WriteString("\nAPI REFERENCE:\n")
+	sb.WriteString(fmt.Sprintf("• Self Link: %s\n", policy.SelfLink))
+	sb.WriteString(fmt.Sprintf("• Kind: %s\n", policy.Kind))
+	sb.WriteString(fmt.Sprintf("• Policy ID: %s\n", policy.ID))
+	
+	sb.WriteString("\nTIP: Use this policy ID for direct API requests and automation\n")
+	sb.WriteString("----------------------------------------\n")
+	
+	return sb.String()
+}
+
+func FormatSignatureStatus(signatures []bigip.SignatureStatus) string {
+	var sb strings.Builder
+	sb.WriteString("\n=== WAF Policy Signature Status ===\n")
+	sb.WriteString("Reference: iControl REST API v14.1.0, Chapter 7: ASM Signatures\n")
+	sb.WriteString("----------------------------------------\n")
+
+	if len(signatures) == 0 {
+		sb.WriteString("\nNo signatures found for this policy.\n")
+		return sb.String()
+	}
+
+	sb.WriteString(fmt.Sprintf("\nFound %d Signatures:\n", len(signatures)))
+
+	for i, sig := range signatures {
+		sb.WriteString(fmt.Sprintf("\n[%d] Signature Details:\n", i+1))
+		sb.WriteString("----------------------------------------\n")
+		sb.WriteString(fmt.Sprintf("Name: %s\n", sig.SignatureName))
+		sb.WriteString(fmt.Sprintf("Signature ID: %s\n", sig.SignatureID))
+		
+		// Status section with enhanced formatting
+		sb.WriteString("\nStatus:\n")
+		sb.WriteString(fmt.Sprintf("• Enabled:  %s\n", map[bool]string{
+			true:  "Yes ✓",
+			false: "No ✗",
+		}[sig.Enabled]))
+		sb.WriteString(fmt.Sprintf("• Staging:  %s\n", map[bool]string{
+			true:  "Yes (Learning Mode)",
+			false: "No (Production Mode)",
+		}[sig.PerformStaging]))
+		sb.WriteString(fmt.Sprintf("• Blocking: %s\n", map[bool]string{
+			true:  "Active (Violations Blocked)",
+			false: "Inactive (Monitoring Only)",
+		}[sig.Block]))
+
+		// Policy context information
+		if sig.PolicyName != "" {
+			sb.WriteString(fmt.Sprintf("\nPolicy Context:\n"))
+			sb.WriteString(fmt.Sprintf("• Policy: %s\n", sig.PolicyName))
+		}
+		if sig.Context != "" {
+			sb.WriteString(fmt.Sprintf("• Context: %s\n", sig.Context))
+		}
+
+		// Additional properties section
+		sb.WriteString("\nProperties:\n")
+		if sig.SignatureType != "" {
+			sb.WriteString(fmt.Sprintf("• Type:     %s\n", sig.SignatureType))
+		}
+		if sig.AccuracyLevel != "" {
+			sb.WriteString(fmt.Sprintf("• Accuracy: %s\n", sig.AccuracyLevel))
+		}
+		if sig.RiskLevel != "" {
+			sb.WriteString(fmt.Sprintf("• Risk:     %s\n", sig.RiskLevel))
+		}
+
+		// Description section if available
+		if sig.Description != "" {
+			sb.WriteString("\nDescription:\n")
+			sb.WriteString(fmt.Sprintf("%s\n", sig.Description))
+		}
+		sb.WriteString("----------------------------------------\n")
+	}
 	return sb.String()
 }

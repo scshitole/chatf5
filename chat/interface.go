@@ -54,46 +54,94 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 
 	// WAF Policy related queries
 	if containsAny(lowerResponse, []string{
-		"waf", "web application firewall", 
+		"waf", "web application firewall",
 		"asm", "application security",
 		"security policy", "policies",
 		"protection", "web security",
 	}) {
 		log.Printf("Detected WAF policy query request: %s", originalQuery)
-		
+
 		// Check if looking for a specific policy details
-		if (strings.Contains(lowerResponse, "details") || 
-			strings.Contains(lowerResponse, "show") || 
-			strings.Contains(lowerResponse, "get")) && 
+		if (strings.Contains(lowerResponse, "details") ||
+			strings.Contains(lowerResponse, "show") ||
+			strings.Contains(lowerResponse, "get")) &&
 			strings.Contains(lowerResponse, "policy") {
-			
+
 			log.Printf("Detected request for specific WAF policy details")
-			
-			// Extract policy name from the query
-			words := strings.Fields(lowerResponse)
+
+			// Check for specific policy name in the query
 			var policyName string
-			for i, word := range words {
-				if (word == "policy" || word == "waf" || word == "asm") && i+1 < len(words) {
-					policyName = words[i+1]
-					if !strings.Contains(policyName, "details") && !strings.Contains(policyName, "policy") {
+			if strings.Contains(strings.ToLower(originalQuery), "demo") {
+				policyName = "demo"
+				log.Printf("Found explicit policy name in query: demo")
+			} else {
+				// Extract policy name from query
+				words := strings.Fields(originalQuery)
+				for i := len(words) - 1; i >= 0; i-- {
+					word := words[i]
+					if !strings.Contains(strings.ToLower(word), "policy") && 
+					   !strings.Contains(strings.ToLower(word), "details") &&
+					   !strings.Contains(strings.ToLower(word), "show") {
+						policyName = word
 						log.Printf("Found policy name in query: %s", policyName)
 						break
 					}
 				}
 			}
-			
-			if policyName != "" {
+
+			if policyName == "" {
+				return "", fmt.Errorf("could not determine policy name from query. Please specify the policy name, for example: 'show policy details for demo'")
+			}
+
+			log.Printf("Found policy name in query: %s", policyName)
+
+			// Check if requesting signature status
+			if containsAny(strings.ToLower(originalQuery), []string{
+				"signature", "signatures", "attack signatures",
+				"security signatures", "waf signatures",
+			}) {
+				log.Printf("Detected signature status query for policy: %s", policyName)
+				
+				// First get policy details to get the policy ID
+				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
+				if err != nil {
+					log.Printf("Error fetching WAF policy details: %v", err)
+					return "", fmt.Errorf("failed to fetch WAF policy details for signatures: %v\nPlease verify:\n1. Policy name is correct\n2. Policy exists and is accessible\n3. You have necessary permissions", err)
+				}
+
+				if policy.ID == "" {
+					return "", fmt.Errorf("policy '%s' found but has no ID. This is unexpected - please verify policy configuration", policyName)
+				}
+
+				// Use policy ID to get signature status
+				signatures, err := i.bigipClient.GetPolicySignatureStatus(policy.ID)
+				if err != nil {
+					log.Printf("Error fetching signature status: %v", err)
+					return "", fmt.Errorf("failed to fetch signature status: %v\nTroubleshooting steps:\n1. Verify policy is active\n2. Check ASM module status\n3. Confirm signature set is configured", err)
+				}
+
+				if len(signatures) == 0 {
+					log.Printf("No signatures found for policy: %s", policyName)
+					return "No signatures found for this policy. This could mean:\n1. The policy has no signature sets configured\n2. All signatures are disabled\n3. The policy is not using signature-based protection", nil
+				}
+
+				log.Printf("Successfully retrieved %d signatures for policy: %s", len(signatures), policyName)
+				return utils.FormatSignatureStatus(signatures), nil
+			}
+
+			// Regular policy details
+			if len(policyName) > 0 {
 				log.Printf("Attempting to fetch details for WAF policy: %s", policyName)
 				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
 				if err != nil {
 					log.Printf("Error fetching WAF policy details: %v", err)
 					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
 				}
-				log.Printf("Successfully retrieved WAF policy details for %s", policyName)
+				log.Printf("Successfully retrieved WAF policy details")
 				return utils.FormatWAFPolicyDetails(policy), nil
 			}
 		}
-		
+
 		// Default: list all policies with virtual server associations
 		log.Printf("Fetching all WAF policies with virtual server associations")
 		policies, err := i.bigipClient.GetWAFPolicies()
@@ -111,7 +159,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			}
 		}
 		log.Printf("Successfully retrieved %d WAF policies", len(policies))
-		
+
 		// Log policy details for debugging
 		for _, policy := range policies {
 			log.Printf("Processing policy: %s", policy.Name)
@@ -119,7 +167,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			log.Printf("Status: %v", policy.Active)
 			log.Printf("Enforcement Mode: %s", policy.EnforcementMode)
 		}
-		
+
 		return utils.FormatWAFPolicies(policies), nil
 	}
 

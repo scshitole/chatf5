@@ -36,6 +36,21 @@ type Node struct {
 }
 
 // WAFPolicy represents a BIG-IP WAF (ASM) policy
+type SignatureStatus struct {
+	ID              string `json:"id"`
+	SignatureID     string `json:"signatureId"`
+	SignatureName   string `json:"signatureName"`
+	Enabled         bool   `json:"enabled"`
+	PerformStaging  bool   `json:"performStaging"`
+	Block           bool   `json:"block"`
+	Description     string `json:"description,omitempty"`
+	SignatureType   string `json:"signatureType,omitempty"`
+	AccuracyLevel   string `json:"accuracy,omitempty"`
+	RiskLevel       string `json:"riskLevel,omitempty"`
+	PolicyName      string `json:"policyName,omitempty"`
+	Context         string `json:"context,omitempty"`
+}
+
 type WAFPolicy struct {
 	Name             string                 `json:"name"`
 	FullPath         string                 `json:"fullPath"`
@@ -54,21 +69,16 @@ type WAFPolicy struct {
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
-	log.Printf("Raw BIG-IP host from environment: %s", cfg.BigIPHost)
-
-	// Parse host and port
+	// Parse host and port according to iControl REST API specs
 	hostParts := strings.Split(strings.TrimSpace(cfg.BigIPHost), ":")
 	host := hostParts[0]
-	port := "443" // default HTTPS port
+	port := "443" // default HTTPS port per F5 documentation
 	if len(hostParts) > 1 {
 		port = hostParts[1]
 	}
 
-	log.Printf("Parsed host components - Host: %s, Port: %s", host, port)
-
-	// Construct proper URL
+	// Construct proper URL with required format: https://<hostname>/mgmt/tm/<module>
 	baseURL := fmt.Sprintf("https://%s:%s", host, port)
-	log.Printf("Constructed base URL: %s", baseURL)
 
 	// Create configuration for BIG-IP session
 	config := &bigip.Config{
@@ -77,11 +87,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		Password: cfg.BigIPPassword,
 	}
 
-	log.Printf("Creating BIG-IP session with configuration: Address=%s, Username=%s",
-		config.Address, config.Username)
-
 	bigipClient := bigip.NewSession(config)
-	log.Printf("BIG-IP session created, attempting API connection...")
 
 	// Set custom transport with enhanced TLS configuration for HTTPS
 	customTransport := &http.Transport{
@@ -109,8 +115,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	bigipClient.Transport = customTransport
 
 	// Test connection with timeout
-	log.Printf("Starting connection test to BIG-IP at %s", host)
-	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
+	log.Printf("Testing connection to BIG-IP...")
 
 	// Create a channel for connection result
 	connectionStatus := make(chan error, 1)
@@ -136,9 +141,9 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			}
 
 			// Try to fetch virtual servers as a connection test
-			testVs, testErr := bigipClient.VirtualServers()
-			if testErr == nil {
-				log.Printf("Connection successful on attempt %d, found %d virtual servers", retry+1, len(testVs.VirtualServers))
+			vs, testErr := bigipClient.VirtualServers()
+			if testErr == nil && vs != nil {
+				log.Printf("Connected to BIG-IP successfully")
 				connectionStatus <- nil
 				return
 			}
@@ -215,12 +220,12 @@ type ASMPoliciesResponse struct {
 }
 
 // GetWAFPolicies retrieves the list of WAF policies from BIG-IP
+// Reference: iControl REST API User Guide 14.1.0
+// Endpoint: /mgmt/tm/asm/policies
+// Method: GET
+// Required Role: Administrator or Resource Administrator
+// Response Format: Collection of ASM policy objects
 func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
-	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
-	log.Printf("Endpoint: /mgmt/tm/asm/policies")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-
 	maxRetries := 3
 	baseDelay := 5 * time.Second
 	maxDelay := 30 * time.Second
@@ -264,38 +269,46 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 		errStr := err.Error()
 		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
 
-		// Determine if we should retry based on error type
+		// Error handling based on F5 iControl REST API error codes
+		// Reference: iControl REST API User Guide 14.1.0, Chapter 4: Response Codes
 		shouldRetry := false
 		switch {
-		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
-			log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
-			// Don't retry auth errors
+		case strings.Contains(strings.ToLower(errStr), "401"):
+			// 401: Authentication failed
+			log.Printf("Authentication Error (401): Invalid credentials or token expired")
+			log.Printf("Action: Verify username/password or renew authentication token")
+		case strings.Contains(strings.ToLower(errStr), "403"):
+			// 403: Authorization failed
+			log.Printf("Authorization Error (403): Insufficient permissions for the operation")
+			log.Printf("Action: Verify user role assignments and partition access")
+		case strings.Contains(strings.ToLower(errStr), "404"):
+			// 404: Resource not found
+			log.Printf("Resource Not Found (404): The requested resource does not exist")
+			log.Printf("Action: Verify the resource path and partition accessibility")
+			shouldRetry = false
+		case strings.Contains(strings.ToLower(errStr), "409"):
+			// 409: Conflict in resource state
+			log.Printf("Resource Conflict (409): The request conflicts with the current state")
+			log.Printf("Action: Verify resource state and try again")
+			shouldRetry = true
 		case strings.Contains(strings.ToLower(errStr), "connection"):
-			log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
-			log.Printf("Please verify:\n1. Network connectivity\n2. BIG-IP management interface\n3. ASM module is provisioned and licensed")
-		log.Printf("Attempting to verify ASM module status...")
-		// Try to make a HEAD request to check if the endpoint exists
-		headReq := &bigip.APIRequest{
-			Method:      "HEAD",
-			URL:         "mgmt/tm/asm/policies",
-			ContentType: "application/json",
-		}
-		_, headErr := c.BigIP.APICall(headReq)
-		if headErr != nil {
-			log.Printf("ASM endpoint check failed: %v", headErr)
-		} else {
-			log.Printf("ASM endpoint exists but GET request failed - possible permission issue")
-		}
+			// Connection-level errors
+			log.Printf("Connection Error: Unable to reach BIG-IP")
+			log.Printf("Action: Verify network connectivity and BIG-IP availability")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "certificate"):
+			// SSL/TLS errors
+			log.Printf("TLS Certificate Error: Certificate validation failed")
+			log.Printf("Action: Verify SSL certificate or use SSL verification bypass for testing")
 			shouldRetry = true
 		case strings.Contains(strings.ToLower(errStr), "timeout"):
-			log.Printf("Timeout Error: Request timed out")
+			// Timeout errors
+			log.Printf("Timeout Error (408): Request exceeded time limit")
+			log.Printf("Action: Verify BIG-IP load and network latency")
 			shouldRetry = true
-		case strings.Contains(strings.ToLower(errStr), "not found"):
-			log.Printf("Endpoint Error: WAF/ASM endpoint not found")
-			log.Printf("Please verify ASM module is provisioned on BIG-IP")
-			// Don't retry 404 errors
 		default:
 			log.Printf("Unhandled error type - Full error: %v", err)
+			log.Printf("Action: Check BIG-IP logs for detailed information")
 			shouldRetry = true
 		}
 
@@ -348,15 +361,14 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 	return wafPolicies, nil
 }
 
-// GetWAFPolicyDetails retrieves detailed information about a specific WAF policy
+// GetWAFPolicyDetails retrieves details for a specific WAF policy
+// Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management
+// Endpoint: /mgmt/tm/asm/policies
+// Method: GET with policy name filter
 func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 	if policyName == "" {
 		return nil, fmt.Errorf("policy name cannot be empty")
 	}
-	log.Printf("\nAttempting to fetch details for WAF policy: %s", policyName)
-	log.Printf("\n=== Starting GetWAFPolicyDetails Operation for policy: %s ===", policyName)
-	log.Printf("Endpoint: /mgmt/tm/asm/policies")
-	log.Printf("Method: GET")
 
 	maxRetries := 3
 	baseDelay := 5 * time.Second
@@ -399,23 +411,46 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 		errStr := err.Error()
 		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
 
-		// Determine if we should retry based on error type
+		// Error handling based on F5 iControl REST API error codes
+		// Reference: iControl REST API User Guide 14.1.0, Chapter 4: Response Codes
 		shouldRetry := false
 		switch {
-		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
-			log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
-			// Don't retry auth errors
+		case strings.Contains(strings.ToLower(errStr), "401"):
+			// 401: Authentication failed
+			log.Printf("Authentication Error (401): Invalid credentials or token expired")
+			log.Printf("Action: Verify username/password or renew authentication token")
+		case strings.Contains(strings.ToLower(errStr), "403"):
+			// 403: Authorization failed
+			log.Printf("Authorization Error (403): Insufficient permissions for the operation")
+			log.Printf("Action: Verify user role assignments and partition access")
+		case strings.Contains(strings.ToLower(errStr), "404"):
+			// 404: Resource not found
+			log.Printf("Resource Not Found (404): The requested resource does not exist")
+			log.Printf("Action: Verify the resource path and partition accessibility")
+			shouldRetry = false
+		case strings.Contains(strings.ToLower(errStr), "409"):
+			// 409: Conflict in resource state
+			log.Printf("Resource Conflict (409): The request conflicts with the current state")
+			log.Printf("Action: Verify resource state and try again")
+			shouldRetry = true
 		case strings.Contains(strings.ToLower(errStr), "connection"):
-			log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
+			// Connection-level errors
+			log.Printf("Connection Error: Unable to reach BIG-IP")
+			log.Printf("Action: Verify network connectivity and BIG-IP availability")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "certificate"):
+			// SSL/TLS errors
+			log.Printf("TLS Certificate Error: Certificate validation failed")
+			log.Printf("Action: Verify SSL certificate or use SSL verification bypass for testing")
 			shouldRetry = true
 		case strings.Contains(strings.ToLower(errStr), "timeout"):
-			log.Printf("Timeout Error: Request timed out")
+			// Timeout errors
+			log.Printf("Timeout Error (408): Request exceeded time limit")
+			log.Printf("Action: Verify BIG-IP load and network latency")
 			shouldRetry = true
-		case strings.Contains(strings.ToLower(errStr), "not found"):
-			log.Printf("Endpoint Error: WAF/ASM endpoint or policy not found")
-			// Don't retry 404 errors
 		default:
 			log.Printf("Unhandled error type - Full error: %v", err)
+			log.Printf("Action: Check BIG-IP logs for detailed information")
 			shouldRetry = true
 		}
 
@@ -453,60 +488,33 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 }
 
 func (c *Client) GetVirtualServers() ([]VirtualServer, error) {
-	log.Println("\n=== Starting GetVirtualServers Operation ===")
-	log.Printf("Endpoint: /mgmt/tm/ltm/virtual")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-
-	log.Println("\nMaking API request to fetch virtual servers...")
 	vs, err := c.VirtualServers()
 	if err != nil {
-		log.Printf("\nERROR: Failed to fetch virtual servers")
-		log.Printf("Error Type: %T", err)
-		log.Printf("Error Message: %v", err)
-
 		errStr := err.Error()
 		switch {
 		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
-			log.Printf("Authentication Error: Please verify credentials")
+			return nil, fmt.Errorf("authentication failed: please verify credentials")
 		case strings.Contains(strings.ToLower(errStr), "connection"):
-			log.Printf("Connection Error: Unable to reach BIG-IP")
+			return nil, fmt.Errorf("connection error: unable to reach BIG-IP")
 		case strings.Contains(strings.ToLower(errStr), "certificate"):
-			log.Printf("TLS Certificate Error: Certificate validation failed")
+			return nil, fmt.Errorf("TLS certificate error: certificate validation failed")
 		case strings.Contains(strings.ToLower(errStr), "no such host"):
-			log.Printf("DNS Error: Unable to resolve BIG-IP hostname")
+			return nil, fmt.Errorf("DNS error: unable to resolve BIG-IP hostname")
 		case strings.Contains(strings.ToLower(errStr), "timeout"):
-			log.Printf("Timeout Error: Request took too long to complete")
+			return nil, fmt.Errorf("timeout error: request took too long to complete")
 		default:
-			log.Printf("Unhandled error type - Full error: %v", err)
+			return nil, fmt.Errorf("API request failed: %v", err)
 		}
-		return nil, fmt.Errorf("API request failed: %v", err)
 	}
-
-	log.Println("\nAPI Response received successfully")
 
 	var virtualServers []VirtualServer
 	if vs != nil && vs.VirtualServers != nil {
-		count := len(vs.VirtualServers)
-		log.Printf("\nFound %d virtual server(s)", count)
-
-		for i, v := range vs.VirtualServers {
-			log.Printf("\nVirtual Server [%d/%d]:", i+1, count)
-			log.Printf("  Name:        %s", v.Name)
-			log.Printf("  Destination: %s", v.Destination)
-			log.Printf("  Pool:        %s", v.Pool)
-			log.Printf("  Status:      %s", map[bool]string{true: "Enabled", false: "Disabled"}[v.Enabled])
+		for _, v := range vs.VirtualServers {
 			vs := v // Create a copy to avoid referencing the loop variable
 			virtualServers = append(virtualServers, VirtualServer{VirtualServer: &vs})
 		}
-	} else {
-		log.Printf("\nWARNING: No virtual servers found")
-		log.Printf("Response validation:")
-		log.Printf("- vs object is nil: %v", vs == nil)
-		log.Printf("- vs.VirtualServers is nil: %v", vs != nil && vs.VirtualServers == nil)
 	}
 
-	log.Printf("GetVirtualServers operation completed. Returning %d virtual servers", len(virtualServers))
 	return virtualServers, nil
 }
 
@@ -538,6 +546,49 @@ func (c *Client) GetPools() ([]Pool, map[string][]string, error) {
 	return poolList, poolMembers, nil
 }
 
+
+// GetPolicySignatureStatus retrieves signature status information for a specific WAF policy
+// Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management
+// Endpoint: /mgmt/tm/asm/signature-statuses
+func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, error) {
+	if policyID == "" {
+		return nil, fmt.Errorf("policy ID cannot be empty")
+	}
+
+	type SignatureResponse struct {
+		Items []SignatureStatus `json:"items"`
+	}
+
+	var signatures SignatureResponse
+	req := &bigip.APIRequest{
+		Method:      "GET",
+		URL:         "mgmt/tm/asm/signature-statuses",
+		ContentType: "application/json",
+	}
+
+	log.Printf("\nMaking API request to fetch signature status...")
+	resp, err := c.BigIP.APICall(req)
+	if err != nil {
+		log.Printf("Error fetching signature status: %v", err)
+		return nil, fmt.Errorf("failed to get signature status: %v", err)
+	}
+
+	if err = json.Unmarshal(resp, &signatures); err != nil {
+		log.Printf("Error parsing signature status response: %v", err)
+		return nil, fmt.Errorf("failed to parse signature status: %v", err)
+	}
+
+	log.Printf("\nFound %d signatures for policy", len(signatures.Items))
+	for i, sig := range signatures.Items {
+		log.Printf("Signature [%d]:", i+1)
+		log.Printf("  ID: %s", sig.SignatureID)
+		log.Printf("  Name: %s", sig.SignatureName)
+		log.Printf("  Enabled: %v", sig.Enabled)
+		log.Printf("  Staging: %v", sig.PerformStaging)
+	}
+
+	return signatures.Items, nil
+}
 func (c *Client) GetNodes() ([]Node, error) {
 	nodes, err := c.Nodes()
 	if err != nil {

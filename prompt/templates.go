@@ -7,7 +7,8 @@ const (
    - Name: The unique identifier of the WAF policy
    - Status: Current operational status (Active/Inactive)
    - Virtual Servers: List of virtual servers where this policy is applied
-   - Enforcement Mode: How policy violations are handled (blocking/transparent)`
+   - Enforcement Mode: How policy violations are handled (blocking/transparent)
+   - Signatures: View detailed signature information using "show signatures for <policy_name>"`
 
 	VirtualServerListTemplate = `To list virtual servers (VIPs), I'll need to:
 1. Query the /mgmt/tm/ltm/virtual endpoint
