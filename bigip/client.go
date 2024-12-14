@@ -35,6 +35,24 @@ type Node struct {
 	*bigip.Node
 }
 
+// WAFPolicy represents a BIG-IP WAF (ASM) policy
+type WAFPolicy struct {
+	Name             string                 `json:"name"`
+	FullPath         string                 `json:"fullPath"`
+	ID               string                 `json:"id"`
+	Description      string                 `json:"description,omitempty"`
+	Active           bool                   `json:"active"`
+	Type             string                 `json:"type,omitempty"`
+	EnforcementMode  string                 `json:"enforcementMode,omitempty"`
+	Kind             string                 `json:"kind,omitempty"`
+	SelfLink         string                 `json:"selfLink,omitempty"`
+	SignatureStaging bool                   `json:"signatureStaging,omitempty"`
+	VirtualServers   []string              `json:"virtualServers,omitempty"`
+	SignatureSetings map[string]interface{} `json:"signatureSettings,omitempty"`
+	BlockingMode     string                 `json:"blockingMode,omitempty"`
+	PlaceSignatures  bool                   `json:"placeSignaturesInStaging,omitempty"`
+}
+
 func NewClient(cfg *config.Config) (*Client, error) {
 	log.Printf("Raw BIG-IP host from environment: %s", cfg.BigIPHost)
 
@@ -77,10 +95,10 @@ func NewClient(cfg *config.Config) (*Client, error) {
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			},
 		},
-		TLSHandshakeTimeout:   45 * time.Second,
-		ResponseHeaderTimeout: 45 * time.Second,
-		ExpectContinueTimeout: 15 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 5 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
 		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
@@ -166,22 +184,16 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}, nil
 }
 
-// ASMPolicy represents a WAF/ASM policy in BIG-IP
+// ASMPolicy represents detailed WAF/ASM policy information in BIG-IP
 type ASMPolicy struct {
-	Name             string                 `json:"name"`
-	FullPath         string                 `json:"fullPath"`
-	ID               string                 `json:"id"`
-	Description      string                 `json:"description,omitempty"`
-	Active           bool                   `json:"active"`
-	Type             string                 `json:"type,omitempty"`
-	EnforcementMode  string                 `json:"enforcementMode,omitempty"`
-	Kind             string                 `json:"kind,omitempty"`
-	SelfLink         string                 `json:"selfLink,omitempty"`
-	SignatureSetings map[string]interface{} `json:"signatureSettings,omitempty"`
-	BlockingMode     string                 `json:"blockingMode,omitempty"`
-	SignatureStaging bool                   `json:"signatureStaging,omitempty"`
-	PlaceSignatures  bool                   `json:"placeSignaturesInStaging,omitempty"`
-	VirtualServers   []string              `json:"virtualServers,omitempty"`
+	WAFPolicy
+	WhitelistIPs     []string               `json:"whitelistIps,omitempty"`
+	BlacklistIPs     []string               `json:"blacklistIps,omitempty"`
+	ModificationTime  string                 `json:"modificationTime,omitempty"`
+	TemplateType     string                 `json:"templateType,omitempty"`
+	TemplateReference string                 `json:"templateReference,omitempty"`
+	ManualLock       bool                   `json:"manualLock,omitempty"`
+	Parameters       map[string]interface{} `json:"parameters,omitempty"`
 }
 
 // ASMPoliciesResponse represents the response from BIG-IP for ASM policies
@@ -193,7 +205,7 @@ type ASMPoliciesResponse struct {
 }
 
 // GetWAFPolicies retrieves the list of WAF policies from BIG-IP
-func (c *Client) GetWAFPolicies() ([]string, error) {
+func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
 	log.Printf("Endpoint: /mgmt/tm/asm/policies")
 	log.Printf("Method: GET")
@@ -249,22 +261,39 @@ func (c *Client) GetWAFPolicies() ([]string, error) {
 		}
 	}
 
-	var policyNames []string
+	var wafPolicies []*WAFPolicy
 	for _, policy := range policies.Items {
 		log.Printf("\nProcessing policy:")
 		log.Printf("  Name: %s", policy.Name)
 		log.Printf("  ID: %s", policy.ID)
 		log.Printf("  Type: %s", policy.Type)
 		log.Printf("  Enforcement Mode: %s", policy.EnforcementMode)
-		policyNames = append(policyNames, policy.Name)
+		
+		wafPolicy := &WAFPolicy{
+			Name:             policy.Name,
+			FullPath:         policy.FullPath,
+			ID:               policy.ID,
+			Description:      policy.Description,
+			Active:           policy.Active,
+			Type:             policy.Type,
+			EnforcementMode:  policy.EnforcementMode,
+			SignatureStaging: policy.SignatureStaging,
+			VirtualServers:   policy.VirtualServers,
+			BlockingMode:     policy.BlockingMode,
+			PlaceSignatures:  policy.PlaceSignatures,
+			SignatureSetings: policy.SignatureSetings,
+			Kind:            policy.Kind,
+			SelfLink:        policy.SelfLink,
+		}
+		wafPolicies = append(wafPolicies, wafPolicy)
 	}
 
-	log.Printf("\nFound %d WAF policies", len(policyNames))
-	return policyNames, nil
+	log.Printf("\nFound %d WAF policies", len(wafPolicies))
+	return wafPolicies, nil
 }
 
 // GetWAFPolicyDetails retrieves detailed information about a specific WAF policy
-func (c *Client) GetWAFPolicyDetails(policyName string) (*ASMPolicy, error) {
+func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 	log.Printf("\n=== Starting GetWAFPolicyDetails Operation for policy: %s ===", policyName)
 	log.Printf("Endpoint: /mgmt/tm/asm/policies")
 	log.Printf("Method: GET")
@@ -289,10 +318,26 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*ASMPolicy, error) {
 		return nil, fmt.Errorf("WAF policy '%s' not found", policyName)
 	}
 
-	return &policiesResp.Items[0], nil
+	policy := policiesResp.Items[0]
+	return &WAFPolicy{
+		Name:             policy.Name,
+		FullPath:         policy.FullPath,
+		ID:               policy.ID,
+		Description:      policy.Description,
+		Active:           policy.Active,
+		Type:             policy.Type,
+		EnforcementMode:  policy.EnforcementMode,
+		SignatureStaging: policy.SignatureStaging,
+		VirtualServers:   policy.VirtualServers,
+		BlockingMode:     policy.BlockingMode,
+		PlaceSignatures:  policy.PlaceSignatures,
+		SignatureSetings: policy.SignatureSetings,
+		Kind:            policy.Kind,
+		SelfLink:        policy.SelfLink,
+	}, nil
 }
 
-func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
+func (c *Client) GetVirtualServers() ([]VirtualServer, error) {
 	log.Println("\n=== Starting GetVirtualServers Operation ===")
 	log.Printf("Endpoint: /mgmt/tm/ltm/virtual")
 	log.Printf("Method: GET")
@@ -321,7 +366,7 @@ func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 
 	log.Println("\nAPI Response received successfully")
 
-	var virtualServers []bigip.VirtualServer
+	var virtualServers []VirtualServer
 	if vs != nil && vs.VirtualServers != nil {
 		count := len(vs.VirtualServers)
 		log.Printf("\nFound %d virtual server(s)", count)
@@ -332,7 +377,8 @@ func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 			log.Printf("  Destination: %s", v.Destination)
 			log.Printf("  Pool:        %s", v.Pool)
 			log.Printf("  Status:      %s", map[bool]string{true: "Enabled", false: "Disabled"}[v.Enabled])
-			virtualServers = append(virtualServers, v)
+			vs := v // Create a copy to avoid referencing the loop variable
+			virtualServers = append(virtualServers, VirtualServer{VirtualServer: &vs})
 		}
 	} else {
 		log.Printf("\nWARNING: No virtual servers found")
@@ -345,17 +391,18 @@ func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 	return virtualServers, nil
 }
 
-func (c *Client) GetPools() ([]bigip.Pool, map[string][]string, error) {
+func (c *Client) GetPools() ([]Pool, map[string][]string, error) {
 	pools, err := c.Pools()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get pools: %v", err)
 	}
 
-	var poolList []bigip.Pool
+	var poolList []Pool
 	poolMembers := make(map[string][]string)
 
 	for _, p := range pools.Pools {
-		poolList = append(poolList, p)
+		pool := p // Create a copy to avoid referencing the loop variable
+		poolList = append(poolList, Pool{Pool: &pool})
 		members, err := c.PoolMembers(p.Name)
 		if err != nil {
 			fmt.Printf("Warning: failed to get members for pool %s: %v\n", p.Name, err)
@@ -372,15 +419,16 @@ func (c *Client) GetPools() ([]bigip.Pool, map[string][]string, error) {
 	return poolList, poolMembers, nil
 }
 
-func (c *Client) GetNodes() ([]bigip.Node, error) {
+func (c *Client) GetNodes() ([]Node, error) {
 	nodes, err := c.Nodes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes: %v", err)
 	}
 
-	var nodeList []bigip.Node
+	var nodeList []Node
 	for _, n := range nodes.Nodes {
-		nodeList = append(nodeList, n)
+		node := n // Create a copy to avoid referencing the loop variable
+		nodeList = append(nodeList, Node{Node: &node})
 	}
 	return nodeList, nil
 }

@@ -4,11 +4,18 @@ import (
 	"fmt"
 	"strings"
 
-	gobigip "github.com/f5devcentral/go-bigip"
 	"f5chat/bigip"
 )
 
-func FormatVirtualServers(vs []bigip.VirtualServer) string {
+// Type aliases for bigip package types
+type (
+	VirtualServer = bigip.VirtualServer
+	Pool         = bigip.Pool
+	Node         = bigip.Node
+	WAFPolicy    = bigip.WAFPolicy
+)
+
+func FormatVirtualServers(vs []VirtualServer) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== Virtual Servers (VIPs) ===\n")
 	
@@ -37,7 +44,7 @@ func FormatVirtualServers(vs []bigip.VirtualServer) string {
 	return sb.String()
 }
 
-func FormatPools(pools []bigip.Pool, poolMembers map[string][]string) string {
+func FormatPools(pools []Pool, poolMembers map[string][]string) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== Server Pools ===\n")
 
@@ -71,7 +78,7 @@ func FormatPools(pools []bigip.Pool, poolMembers map[string][]string) string {
 	return sb.String()
 }
 
-func FormatNodes(nodes []bigip.Node) string {
+func FormatNodes(nodes []Node) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== Backend Nodes ===\n")
 	
@@ -92,7 +99,7 @@ func FormatNodes(nodes []bigip.Node) string {
 	return sb.String()
 }
 
-func FormatWAFPolicies(policies []string) string {
+func FormatWAFPolicies(policies []*bigip.WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
 	
@@ -104,10 +111,23 @@ func FormatWAFPolicies(policies []string) string {
 
 	sb.WriteString(fmt.Sprintf("\nFound %d WAF Policies:\n", len(policies)))
 	
-	for i, name := range policies {
+	for i, policy := range policies {
 		sb.WriteString(fmt.Sprintf("\n[%d] WAF Policy Details:\n", i+1))
 		sb.WriteString("----------------------------------------\n")
-		sb.WriteString(fmt.Sprintf("Policy Name: %s\n", name))
+		sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
+		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
+		if policy.EnforcementMode != "" {
+			sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
+		}
+		if policy.Type != "" {
+			sb.WriteString(fmt.Sprintf("Type: %s\n", policy.Type))
+		}
+		if len(policy.VirtualServers) > 0 {
+			sb.WriteString("Associated Virtual Servers:\n")
+			for _, vs := range policy.VirtualServers {
+				sb.WriteString(fmt.Sprintf("- %s\n", vs))
+			}
+		}
 		sb.WriteString("----------------------------------------\n")
 	}
 
@@ -120,7 +140,7 @@ func FormatWAFPolicies(policies []string) string {
 	return sb.String()
 }
 
-func FormatWAFPolicyDetails(policy *bigip.ASMPolicy) string {
+func FormatWAFPolicyDetails(policy *bigip.WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n=== WAF Policy Details: %s ===\n", policy.Name))
 	sb.WriteString("----------------------------------------\n")
