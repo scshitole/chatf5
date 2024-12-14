@@ -99,13 +99,19 @@ func FormatNodes(nodes []Node) string {
 	return sb.String()
 }
 
-func FormatWAFPolicies(policies []*bigip.WAFPolicy) string {
+func FormatWAFPolicies(policies []*WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
 	
 	if len(policies) == 0 {
 		sb.WriteString("\nNo WAF policies are currently configured on this BIG-IP system.\n")
-		sb.WriteString("Note: WAF policies protect web applications from various attacks like SQL injection, XSS, etc.\n")
+		sb.WriteString("\nNote: WAF policies protect web applications from:")
+		sb.WriteString("\n- SQL injection attacks")
+		sb.WriteString("\n- Cross-site scripting (XSS)")
+		sb.WriteString("\n- Request/Response validation")
+		sb.WriteString("\n- Protocol compliance")
+		sb.WriteString("\n- Other OWASP Top 10 vulnerabilities\n")
+		sb.WriteString("\nTo configure a WAF policy, use the BIG-IP Configuration utility or API.\n")
 		return sb.String()
 	}
 
@@ -116,18 +122,36 @@ func FormatWAFPolicies(policies []*bigip.WAFPolicy) string {
 		sb.WriteString("----------------------------------------\n")
 		sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
 		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
+		
 		if policy.EnforcementMode != "" {
 			sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
+			if policy.EnforcementMode == "blocking" {
+				sb.WriteString("  (Actively blocking detected violations)\n")
+			} else if policy.EnforcementMode == "transparent" {
+				sb.WriteString("  (Monitoring mode - logging only)\n")
+			}
 		}
+		
 		if policy.Type != "" {
 			sb.WriteString(fmt.Sprintf("Type: %s\n", policy.Type))
 		}
+		
+		sb.WriteString(fmt.Sprintf("Signature Staging: %v\n", map[bool]string{
+			true:  "Enabled (New signatures in staging mode)",
+			false: "Disabled (All signatures in production)",
+		}[policy.SignatureStaging]))
+		
 		if len(policy.VirtualServers) > 0 {
-			sb.WriteString("Associated Virtual Servers:\n")
+			sb.WriteString("\nAssociated Virtual Servers:\n")
 			for _, vs := range policy.VirtualServers {
 				sb.WriteString(fmt.Sprintf("- %s\n", vs))
 			}
 		}
+		
+		if policy.Description != "" {
+			sb.WriteString(fmt.Sprintf("\nDescription: %s\n", policy.Description))
+		}
+		
 		sb.WriteString("----------------------------------------\n")
 	}
 

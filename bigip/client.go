@@ -111,7 +111,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	// Test connection with timeout
 	log.Printf("Starting connection test to BIG-IP at %s", host)
 	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
-	
+
 	// Create a channel for connection result
 	connectionStatus := make(chan error, 1)
 
@@ -194,13 +194,16 @@ func NewClient(cfg *config.Config) (*Client, error) {
 // ASMPolicy represents detailed WAF/ASM policy information in BIG-IP
 type ASMPolicy struct {
 	WAFPolicy
-	WhitelistIPs     []string               `json:"whitelistIps,omitempty"`
-	BlacklistIPs     []string               `json:"blacklistIps,omitempty"`
-	ModificationTime  string                 `json:"modificationTime,omitempty"`
-	TemplateType     string                 `json:"templateType,omitempty"`
-	TemplateReference string                 `json:"templateReference,omitempty"`
-	ManualLock       bool                   `json:"manualLock,omitempty"`
-	Parameters       map[string]interface{} `json:"parameters,omitempty"`
+	WhitelistIPs      []string                 `json:"whitelistIps,omitempty"`
+	BlacklistIPs      []string                 `json:"blacklistIps,omitempty"`
+	ModificationTime  string                   `json:"modificationTime,omitempty"`
+	TemplateType     string                   `json:"templateType,omitempty"`
+	TemplateReference map[string]interface{}   `json:"templateReference,omitempty"`
+	ManualLock       bool                     `json:"manualLock,omitempty"`
+	Parameters       map[string]interface{}    `json:"parameters,omitempty"`
+	Attributes       map[string]interface{}    `json:"attributes,omitempty"`
+	HasParent        bool                     `json:"hasParent,omitempty"`
+	Links            map[string]interface{}    `json:"links,omitempty"`
 }
 
 // ASMPoliciesResponse represents the response from BIG-IP for ASM policies
@@ -241,10 +244,10 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 			URL:         "mgmt/tm/asm/policies",
 			ContentType: "application/json",
 		}
-		
+
 		log.Printf("\nMaking API request to fetch WAF policies...")
 		resp, err := c.BigIP.APICall(req)
-		
+
 		if err == nil {
 			if err = json.Unmarshal(resp, &policies); err == nil {
 				log.Printf("\nAPI Response received and parsed successfully")
@@ -256,11 +259,11 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 			lastErr = fmt.Errorf("JSON parsing error: %v", err)
 			continue
 		}
-		
+
 		lastErr = err
 		errStr := err.Error()
 		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
-		
+
 		// Determine if we should retry based on error type
 		shouldRetry := false
 		switch {
@@ -270,6 +273,19 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 		case strings.Contains(strings.ToLower(errStr), "connection"):
 			log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
 			log.Printf("Please verify:\n1. Network connectivity\n2. BIG-IP management interface\n3. ASM module is provisioned and licensed")
+		log.Printf("Attempting to verify ASM module status...")
+		// Try to make a HEAD request to check if the endpoint exists
+		headReq := &bigip.APIRequest{
+			Method:      "HEAD",
+			URL:         "mgmt/tm/asm/policies",
+			ContentType: "application/json",
+		}
+		_, headErr := c.BigIP.APICall(headReq)
+		if headErr != nil {
+			log.Printf("ASM endpoint check failed: %v", headErr)
+		} else {
+			log.Printf("ASM endpoint exists but GET request failed - possible permission issue")
+		}
 			shouldRetry = true
 		case strings.Contains(strings.ToLower(errStr), "timeout"):
 			log.Printf("Timeout Error: Request timed out")
@@ -282,7 +298,7 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 			log.Printf("Unhandled error type - Full error: %v", err)
 			shouldRetry = true
 		}
-		
+
 		if !shouldRetry || retry == maxRetries-1 {
 			return nil, fmt.Errorf("failed to get WAF policies: %v", lastErr)
 		}
@@ -290,14 +306,14 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 
 	var wafPolicies []*WAFPolicy
 	log.Printf("\nProcessing %d WAF policies...", len(policies.Items))
-	
+
 	for _, policy := range policies.Items {
 		log.Printf("\nProcessing policy:")
 		log.Printf("  Name: %s", policy.Name)
 		log.Printf("  ID: %s", policy.ID)
 		log.Printf("  Type: %s", policy.Type)
 		log.Printf("  Enforcement Mode: %s", policy.EnforcementMode)
-		
+
 		wafPolicy := &WAFPolicy{
 			Name:             policy.Name,
 			FullPath:         policy.FullPath,
@@ -318,11 +334,26 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 	}
 
 	log.Printf("\nFound and processed %d WAF policies successfully", len(wafPolicies))
+	if len(wafPolicies) == 0 {
+		log.Printf("\nWARNING: No WAF policies found. This could indicate that:")
+		log.Printf("1. No WAF policies are configured")
+		log.Printf("2. The ASM module might not be provisioned")
+		log.Printf("3. The user might not have permissions to view WAF policies")
+	} else {
+		log.Printf("\nWAF Policies found:")
+		for i, policy := range wafPolicies {
+			log.Printf("[%d] %s (Type: %s, Mode: %s)", i+1, policy.Name, policy.Type, policy.EnforcementMode)
+		}
+	}
 	return wafPolicies, nil
 }
 
 // GetWAFPolicyDetails retrieves detailed information about a specific WAF policy
 func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
+	if policyName == "" {
+		return nil, fmt.Errorf("policy name cannot be empty")
+	}
+	log.Printf("\nAttempting to fetch details for WAF policy: %s", policyName)
 	log.Printf("\n=== Starting GetWAFPolicyDetails Operation for policy: %s ===", policyName)
 	log.Printf("Endpoint: /mgmt/tm/asm/policies")
 	log.Printf("Method: GET")
@@ -353,7 +384,7 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 
 		log.Printf("\nMaking API request to fetch details for WAF policy: %s", policyName)
 		resp, err := c.BigIP.APICall(req)
-		
+
 		if err == nil {
 			if err = json.Unmarshal(resp, &policiesResp); err == nil {
 				log.Printf("\nAPI Response received and parsed successfully")
@@ -363,11 +394,11 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 			lastErr = fmt.Errorf("JSON parsing error: %v", err)
 			continue
 		}
-		
+
 		lastErr = err
 		errStr := err.Error()
 		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
-		
+
 		// Determine if we should retry based on error type
 		shouldRetry := false
 		switch {
@@ -387,7 +418,7 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 			log.Printf("Unhandled error type - Full error: %v", err)
 			shouldRetry = true
 		}
-		
+
 		if !shouldRetry || retry == maxRetries-1 {
 			return nil, fmt.Errorf("failed to get WAF policy details: %v", lastErr)
 		}
@@ -442,6 +473,10 @@ func (c *Client) GetVirtualServers() ([]VirtualServer, error) {
 			log.Printf("Connection Error: Unable to reach BIG-IP")
 		case strings.Contains(strings.ToLower(errStr), "certificate"):
 			log.Printf("TLS Certificate Error: Certificate validation failed")
+		case strings.Contains(strings.ToLower(errStr), "no such host"):
+			log.Printf("DNS Error: Unable to resolve BIG-IP hostname")
+		case strings.Contains(strings.ToLower(errStr), "timeout"):
+			log.Printf("Timeout Error: Request took too long to complete")
 		default:
 			log.Printf("Unhandled error type - Full error: %v", err)
 		}

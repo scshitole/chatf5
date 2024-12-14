@@ -54,28 +54,33 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 
 	// WAF Policy related queries
 	if containsAny(lowerResponse, []string{
-		"waf policy", "waf policies", 
-		"web application firewall", 
-		"asm policy", "asm policies",
-		"application security",
-		"application firewall",
-		"security policy",
+		"waf", "web application firewall", 
+		"asm", "application security",
+		"security policy", "policies",
+		"protection", "web security",
 	}) {
 		log.Printf("Detected WAF policy query request: %s", originalQuery)
 		
-		// Check if looking for a specific policy
-		if strings.Contains(lowerResponse, "details") && strings.Contains(lowerResponse, "policy") {
+		// Check if looking for a specific policy details
+		if (strings.Contains(lowerResponse, "details") || 
+			strings.Contains(lowerResponse, "show") || 
+			strings.Contains(lowerResponse, "get")) && 
+			strings.Contains(lowerResponse, "policy") {
+			
 			// Extract policy name from the query
 			words := strings.Fields(lowerResponse)
 			var policyName string
 			for i, word := range words {
-				if word == "policy" && i+1 < len(words) {
+				if (word == "policy" || word == "waf" || word == "asm") && i+1 < len(words) {
 					policyName = words[i+1]
-					break
+					if !strings.Contains(policyName, "details") && !strings.Contains(policyName, "policy") {
+						break
+					}
 				}
 			}
 			
 			if policyName != "" {
+				log.Printf("Attempting to fetch details for WAF policy: %s", policyName)
 				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
 				if err != nil {
 					log.Printf("Error fetching WAF policy details: %v", err)
@@ -87,12 +92,17 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 		}
 		
 		// Default: list all policies
+		log.Printf("Fetching all WAF policies")
 		policies, err := i.bigipClient.GetWAFPolicies()
 		if err != nil {
 			log.Printf("Error fetching WAF policies: %v", err)
-			return "", fmt.Errorf("failed to fetch WAF policies: %v", err)
+			// Enhanced error message for users
+			if strings.Contains(err.Error(), "not found") {
+				return "", fmt.Errorf("WAF (Web Application Firewall) policies endpoint not found. Please ensure the ASM module is provisioned on your BIG-IP system")
+			}
+			return "", fmt.Errorf("Unable to fetch WAF policies. This could be due to:\n1. ASM module not being provisioned\n2. Insufficient permissions\n3. Network connectivity issues\n\nError details: %v", err)
 		}
-		log.Printf("Successfully retrieved WAF policies")
+		log.Printf("Successfully retrieved %d WAF policies", len(policies))
 		return utils.FormatWAFPolicies(policies), nil
 	}
 
