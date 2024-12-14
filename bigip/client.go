@@ -59,10 +59,10 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			},
 		},
 		// Enhanced connection settings
-		TLSHandshakeTimeout:   20 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   45 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+		ExpectContinueTimeout: 15 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
 		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
@@ -75,6 +75,16 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	// Test connection with timeout using a simple endpoint
 	log.Printf("Starting connection test to BIG-IP at %s", host)
 	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
+	log.Printf("Connection details:")
+	log.Printf("- Protocol: HTTPS")
+	log.Printf("- Host: %s", host)
+	log.Printf("- Port: %s", port)
+	log.Printf("- Username: %s", cfg.BigIPUsername)
+	log.Printf("- TLS: Enabled with InsecureSkipVerify")
+	log.Printf("- Timeout settings:")
+	log.Printf("  * TLS Handshake: 45s")
+	log.Printf("  * Response Header: 45s")
+	log.Printf("  * Connection Idle: 90s")
 
 	// Create a channel for connection result
 	connectionStatus := make(chan error, 1)
