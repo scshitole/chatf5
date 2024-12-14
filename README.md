@@ -32,11 +32,11 @@ cd chatf5
 2. Set up environment variables in your terminal:
 ```bash
 # BIG-IP Connection Details
-export BIGIP_HOST='54.214.73.31:8443'
-export BIGIP_USERNAME='admin'
-export BIGIP_PASSWORD='F5testnet!'
+export BIGIP_HOST='your-bigip-host:8443'
+export BIGIP_USERNAME='your-bigip-username'
+export BIGIP_PASSWORD='your-bigip-password'
 
-# OpenAI API Configuration (replace with your key)
+# OpenAI API Configuration
 export OPENAI_API_KEY='your-openai-api-key'
 ```
 

@@ -67,6 +67,8 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			strings.Contains(lowerResponse, "get")) && 
 			strings.Contains(lowerResponse, "policy") {
 			
+			log.Printf("Detected request for specific WAF policy details")
+			
 			// Extract policy name from the query
 			words := strings.Fields(lowerResponse)
 			var policyName string
@@ -74,6 +76,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 				if (word == "policy" || word == "waf" || word == "asm") && i+1 < len(words) {
 					policyName = words[i+1]
 					if !strings.Contains(policyName, "details") && !strings.Contains(policyName, "policy") {
+						log.Printf("Found policy name in query: %s", policyName)
 						break
 					}
 				}

@@ -72,11 +72,12 @@ func main() {
 		log.Printf("Response length: %d bytes", len(wafResponse))
 		log.Printf("\nStep 2: Testing WAF policy details...")
 		// Try to get details for the VS_WAF policy if it exists
-		wafDetailResponse, detailErr := chatInterface.ProcessQuery("show policy details VS_WAF")
+		detailResponse, detailErr := chatInterface.ProcessQuery("show policy details VS_WAF")
 		if detailErr != nil {
 			log.Printf("Note: Could not fetch detailed policy information: %v", detailErr)
 		} else {
 			log.Printf("Successfully retrieved WAF policy details")
+			fmt.Printf("\nBIG-IP WAF Policy Details: %s\n", detailResponse)
 		}
 		fmt.Printf("\nBIG-IP WAF Policies: %s\n", wafResponse)
 	}
