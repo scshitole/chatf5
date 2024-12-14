@@ -51,9 +51,9 @@ Set the following environment variables:
 
 ```bash
 # BIG-IP Connection Details
-export BIGIP_HOST="54.214.73.31:8443"     # Your BIG-IP host and port
+export BIGIP_HOST="xxx"     # Your BIG-IP host and port
 export BIGIP_USERNAME="admin"              # Your BIG-IP username
-export BIGIP_PASSWORD="F5testnet!"         # Your BIG-IP password
+export BIGIP_PASSWORD="xxx"         # Your BIG-IP password
 
 # OpenAI API Configuration
 export OPENAI_API_KEY="your-openai-api-key"  # Your OpenAI API key
