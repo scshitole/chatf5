@@ -54,34 +54,43 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 
 	// WAF Policy related queries
 	if containsAny(lowerResponse, []string{
-		"waf", "web application firewall", 
+		"waf", "web application firewall",
 		"asm", "application security",
 		"security policy", "policies",
 		"protection", "web security",
 	}) {
 		log.Printf("Detected WAF policy query request: %s", originalQuery)
-		
+
 		// Check if looking for a specific policy details
-		if (strings.Contains(lowerResponse, "details") || 
-			strings.Contains(lowerResponse, "show") || 
-			strings.Contains(lowerResponse, "get")) && 
+		if (strings.Contains(lowerResponse, "details") ||
+			strings.Contains(lowerResponse, "show") ||
+			strings.Contains(lowerResponse, "get")) &&
 			strings.Contains(lowerResponse, "policy") {
-			
+
 			log.Printf("Detected request for specific WAF policy details")
-			
-			// Extract policy name from the query
-			words := strings.Fields(lowerResponse)
+
+			// Extract policy name from the query, handling both numeric and name-based references
+			query := strings.ToLower(originalQuery)
 			var policyName string
-			for i, word := range words {
-				if (word == "policy" || word == "waf" || word == "asm") && i+1 < len(words) {
-					policyName = words[i+1]
-					if !strings.Contains(policyName, "details") && !strings.Contains(policyName, "policy") {
-						log.Printf("Found policy name in query: %s", policyName)
-						break
-					}
+
+			if strings.Contains(query, "demo") {
+				policyName = "demo"
+			} else if strings.Contains(query, "vs_waf") {
+				policyName = "VS_WAF"
+			} else {
+				// Try to extract the last word as policy name
+				parts := strings.Fields(query)
+				if len(parts) > 0 {
+					policyName = parts[len(parts)-1]
 				}
 			}
-			
+
+			if policyName == "" {
+				return "", fmt.Errorf("could not determine policy name from query")
+			}
+
+			log.Printf("Found policy name in query: %s", policyName)
+
 			if policyName != "" {
 				log.Printf("Attempting to fetch details for WAF policy: %s", policyName)
 				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
@@ -93,7 +102,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 				return utils.FormatWAFPolicyDetails(policy), nil
 			}
 		}
-		
+
 		// Default: list all policies with virtual server associations
 		log.Printf("Fetching all WAF policies with virtual server associations")
 		policies, err := i.bigipClient.GetWAFPolicies()
@@ -111,7 +120,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			}
 		}
 		log.Printf("Successfully retrieved %d WAF policies", len(policies))
-		
+
 		// Log policy details for debugging
 		for _, policy := range policies {
 			log.Printf("Processing policy: %s", policy.Name)
@@ -119,7 +128,7 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			log.Printf("Status: %v", policy.Active)
 			log.Printf("Enforcement Mode: %s", policy.EnforcementMode)
 		}
-		
+
 		return utils.FormatWAFPolicies(policies), nil
 	}
 

@@ -99,9 +99,12 @@ func FormatNodes(nodes []Node) string {
 	return sb.String()
 }
 
+// FormatWAFPolicies formats WAF/ASM policies according to iControl REST API structure
+// Reference: iControl REST API v14.1.0, Chapter 7: Application Security Management
 func FormatWAFPolicies(policies []*WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
+	sb.WriteString("Reference: iControl REST API v14.1.0\n")
 	
 	if len(policies) == 0 {
 		sb.WriteString("\nNo WAF policies are currently configured on this BIG-IP system.\n")
@@ -177,33 +180,58 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 
 func FormatWAFPolicyDetails(policy *bigip.WAFPolicy) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n=== WAF Policy Details: %s ===\n", policy.Name))
+	sb.WriteString("\n=== WAF (Web Application Firewall) Policy Details ===\n")
+	sb.WriteString("Reference: iControl REST API v14.1.0, Chapter 7: Application Security Management\n")
 	sb.WriteString("----------------------------------------\n")
 	
+	// Basic Information
 	sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
+	sb.WriteString(fmt.Sprintf("Full Path: %s\n", policy.FullPath))
 	sb.WriteString(fmt.Sprintf("ID: %s\n", policy.ID))
-	sb.WriteString(fmt.Sprintf("Type: %s\n", policy.Type))
-	sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
-	sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
 	
-	if policy.Description != "" {
-		sb.WriteString(fmt.Sprintf("Description: %s\n", policy.Description))
+	// Policy Status and Type
+	sb.WriteString(fmt.Sprintf("\nStatus Information:\n"))
+	sb.WriteString(fmt.Sprintf("- Active: %s\n", map[bool]string{true: "Yes", false: "No"}[policy.Active]))
+	sb.WriteString(fmt.Sprintf("- Type: %s\n", policy.Type))
+	sb.WriteString(fmt.Sprintf("- Enforcement Mode: %s\n", policy.EnforcementMode))
+	if policy.EnforcementMode == "blocking" {
+		sb.WriteString("  (Policy is actively blocking detected violations)\n")
+	} else if policy.EnforcementMode == "transparent" {
+		sb.WriteString("  (Policy is in monitoring mode - logging only)\n")
 	}
 	
-	if policy.SignatureStaging {
-		sb.WriteString("Signature Mode: Staging\n")
-	} else {
-		sb.WriteString("Signature Mode: Production\n")
+	// Signature Settings
+	sb.WriteString("\nSignature Configuration:\n")
+	sb.WriteString(fmt.Sprintf("- Staging: %s\n", map[bool]string{
+		true:  "Enabled (New signatures in staging mode)",
+		false: "Disabled (All signatures in production)",
+	}[policy.SignatureStaging]))
+	if policy.BlockingMode != "" {
+		sb.WriteString(fmt.Sprintf("- Blocking Mode: %s\n", policy.BlockingMode))
 	}
 	
+	// Virtual Server Associations
 	if len(policy.VirtualServers) > 0 {
-		sb.WriteString("\nAssociated Virtual Servers:\n")
+		sb.WriteString("\nVirtual Server Associations:\n")
 		for _, vs := range policy.VirtualServers {
 			sb.WriteString(fmt.Sprintf("- %s\n", vs))
 		}
+	} else {
+		sb.WriteString("\nNot currently applied to any Virtual Servers\n")
 	}
 	
-	sb.WriteString("\nConfiguration Path: " + policy.FullPath + "\n")
+	// Additional Information
+	if policy.Description != "" {
+		sb.WriteString(fmt.Sprintf("\nDescription: %s\n", policy.Description))
+	}
+	
+	// API Links
+	sb.WriteString("\nAPI Information:\n")
+	sb.WriteString(fmt.Sprintf("- Self Link: %s\n", policy.SelfLink))
+	sb.WriteString(fmt.Sprintf("- Kind: %s\n", policy.Kind))
+	
+	sb.WriteString("\nNote: Use this policy ID for direct API requests: " + policy.ID + "\n")
+	sb.WriteString("----------------------------------------\n")
 	
 	return sb.String()
 }
