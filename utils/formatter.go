@@ -105,3 +105,30 @@ func FormatNodes(nodes []bigip.Node) string {
 
 	return sb.String()
 }
+
+
+func FormatWAFPolicies(policies []string) string {
+	var sb strings.Builder
+	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
+	
+	if len(policies) == 0 {
+		sb.WriteString("\nNo WAF policies are currently configured on this BIG-IP system.\n")
+		sb.WriteString("Note: WAF policies protect web applications from various attacks like SQL injection, XSS, etc.\n")
+		return sb.String()
+	}
+
+	sb.WriteString(fmt.Sprintf("\nFound %d WAF Policies:\n", len(policies)))
+	
+	for i, name := range policies {
+		sb.WriteString(fmt.Sprintf("\n[%d] WAF Policy Details:\n", i+1))
+		sb.WriteString("----------------------------------------\n")
+		sb.WriteString(fmt.Sprintf("Policy Name: %s\n", name))
+		sb.WriteString("----------------------------------------\n")
+	}
+
+	sb.WriteString("\nNote: WAF policies are configured to protect web applications ")
+	sb.WriteString("from various attacks such as SQL injection, cross-site scripting (XSS), ")
+	sb.WriteString("and other OWASP Top 10 vulnerabilities.\n")
+
+	return sb.String()
+}

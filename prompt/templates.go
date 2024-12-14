@@ -1,6 +1,16 @@
 package prompt
 
 const (
+	WAFPolicyListTemplate = `To list WAF policies, I'll need to:
+1. Query the /mgmt/tm/asm/policies endpoint
+2. Format and display the results including:
+   - Name: The unique identifier of the WAF policy
+   - Status: Current operational status
+   - Type: Type of WAF policy
+Additional Information:
+- WAF policies protect web applications from attacks
+- They contain rules and settings for web application security`
+
 	VirtualServerListTemplate = `To list virtual servers (VIPs), I'll need to:
 1. Query the /mgmt/tm/ltm/virtual endpoint
 2. Format and display the results including:
@@ -41,6 +51,7 @@ func GetPromptTemplate(operation string) string {
 		"virtual_servers": VirtualServerListTemplate,
 		"pools":          PoolListTemplate,
 		"nodes":          NodeListTemplate,
+		"waf_policies":   WAFPolicyListTemplate,
 	}
 
 	if template, exists := templates[operation]; exists {

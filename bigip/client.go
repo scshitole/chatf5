@@ -2,6 +2,7 @@ package bigip
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 
 type Client struct {
 	*bigip.BigIP
+	Username string
+	Password string
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -166,7 +169,11 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	// The first connection test was successful, no need for a second test
 	log.Println("Connection to BIG-IP established successfully")
 
-	return &Client{bigipClient}, nil
+	return &Client{
+		BigIP:    bigipClient,
+		Username: cfg.BigIPUsername,
+		Password: cfg.BigIPPassword,
+	}, nil
 }
 
 func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
@@ -269,4 +276,67 @@ func (c *Client) GetNodes() ([]bigip.Node, error) {
 		nodeList = append(nodeList, n)
 	}
 	return nodeList, nil
+}
+// ASMPolicy represents a WAF/ASM policy in BIG-IP
+type ASMPolicy struct {
+	Name          string `json:"name"`
+	FullPath      string `json:"fullPath"`
+	ID            string `json:"id"`
+	Description   string `json:"description,omitempty"`
+	Active        bool   `json:"active"`
+	Type          string `json:"type,omitempty"`
+	EnforcementMode string `json:"enforcementMode,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	SelfLink      string `json:"selfLink,omitempty"`
+}
+
+// ASMPoliciesResponse represents the response from BIG-IP for ASM policies
+type ASMPoliciesResponse struct {
+	Items []ASMPolicy `json:"items"`
+	Kind  string     `json:"kind"`
+	Generation int64 `json:"generation"`
+	SelfLink string  `json:"selfLink"`
+}
+
+// GetWAFPolicies retrieves the list of WAF policies from BIG-IP
+func (c *Client) GetWAFPolicies() ([]string, error) {
+	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
+	log.Printf("Endpoint: /mgmt/tm/asm/policies")
+	log.Printf("Method: GET")
+	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
+
+	var policies ASMPoliciesResponse
+	req := &bigip.APIRequest{
+		Method:      "GET",
+		URL:         "mgmt/tm/asm/policies",
+		ContentType: "application/json",
+	}
+	resp, err := c.BigIP.APICall(req)
+	if err != nil {
+		log.Printf("\nERROR: Failed to fetch WAF policies")
+		log.Printf("Error Type: %T", err)
+		log.Printf("Error Message: %v", err)
+		return nil, fmt.Errorf("failed to get WAF policies: %v", err)
+	}
+	err = json.Unmarshal(resp, &policies)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse WAF policies response: %v", err)
+	}
+
+	log.Printf("\nAPI Response received successfully")
+	log.Printf("Response Kind: %s", policies.Kind)
+	log.Printf("Generation: %d", policies.Generation)
+
+	var policyNames []string
+	for _, policy := range policies.Items {
+		log.Printf("\nProcessing policy:")
+		log.Printf("  Name: %s", policy.Name)
+		log.Printf("  ID: %s", policy.ID)
+		log.Printf("  Type: %s", policy.Type)
+		log.Printf("  Enforcement Mode: %s", policy.EnforcementMode)
+		policyNames = append(policyNames, policy.Name)
+	}
+
+	log.Printf("\nFound %d WAF policies", len(policyNames))
+	return policyNames, nil
 }

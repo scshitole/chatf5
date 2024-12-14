@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"f5chat/bigip"
@@ -29,7 +30,7 @@ func (i *Interface) ProcessQuery(query string) (string, error) {
 	}
 
 	// Execute the appropriate BIG-IP operation based on LLM response
-	response, err := i.executeOperation(llmResponse)
+	response, err := i.executeOperation(llmResponse, query)
 	if err != nil {
 		return "", fmt.Errorf("I understood your request about the BIG-IP configuration, but encountered an issue while fetching the information. Please try again. (Error: %v)", err)
 	}
@@ -47,9 +48,28 @@ func containsAny(text string, phrases []string) bool {
 	return false
 }
 
-func (i *Interface) executeOperation(llmResponse string) (string, error) {
+func (i *Interface) executeOperation(llmResponse string, originalQuery string) (string, error) {
 	// Enhanced intent detection with common variations
 	lowerResponse := strings.ToLower(llmResponse)
+
+	// WAF Policy related queries
+	if containsAny(lowerResponse, []string{
+		"waf policy", "waf policies", 
+		"web application firewall", 
+		"asm policy", "asm policies",
+		"application security",
+		"application firewall",
+		"security policy",
+	}) {
+		log.Printf("Detected WAF policy query request: %s", originalQuery)
+		policies, err := i.bigipClient.GetWAFPolicies()
+		if err != nil {
+			log.Printf("Error fetching WAF policies: %v", err)
+			return "", fmt.Errorf("failed to fetch WAF policies: %v", err)
+		}
+		log.Printf("Successfully retrieved WAF policies")
+		return utils.FormatWAFPolicies(policies), nil
+	}
 
 	// Virtual Server related queries
 	if containsAny(lowerResponse, []string{"virtual server", "vip", "virtual ip", "virtual address"}) {
