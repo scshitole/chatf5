@@ -94,18 +94,32 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			}
 		}
 		
-		// Default: list all policies
-		log.Printf("Fetching all WAF policies")
+		// Default: list all policies with virtual server associations
+		log.Printf("Fetching all WAF policies with virtual server associations")
 		policies, err := i.bigipClient.GetWAFPolicies()
 		if err != nil {
 			log.Printf("Error fetching WAF policies: %v", err)
-			// Enhanced error message for users
-			if strings.Contains(err.Error(), "not found") {
-				return "", fmt.Errorf("WAF (Web Application Firewall) policies endpoint not found. Please ensure the ASM module is provisioned on your BIG-IP system")
+			switch {
+			case strings.Contains(err.Error(), "not found"):
+				return "", fmt.Errorf("WAF (Web Application Firewall) policies endpoint not found. Please ensure:\n1. ASM module is provisioned\n2. You have appropriate permissions\n3. WAF feature is licensed")
+			case strings.Contains(err.Error(), "unauthorized"):
+				return "", fmt.Errorf("Authentication failed. Please verify your credentials and WAF access permissions")
+			case strings.Contains(err.Error(), "connection"):
+				return "", fmt.Errorf("Connection error. Please verify:\n1. BIG-IP is accessible\n2. Network connectivity\n3. HTTPS/TLS settings")
+			default:
+				return "", fmt.Errorf("Unable to fetch WAF policies. This could be due to:\n1. ASM module not being provisioned\n2. Insufficient permissions\n3. Network connectivity issues\n\nError details: %v", err)
 			}
-			return "", fmt.Errorf("Unable to fetch WAF policies. This could be due to:\n1. ASM module not being provisioned\n2. Insufficient permissions\n3. Network connectivity issues\n\nError details: %v", err)
 		}
 		log.Printf("Successfully retrieved %d WAF policies", len(policies))
+		
+		// Log policy details for debugging
+		for _, policy := range policies {
+			log.Printf("Processing policy: %s", policy.Name)
+			log.Printf("Virtual Servers: %v", policy.VirtualServers)
+			log.Printf("Status: %v", policy.Active)
+			log.Printf("Enforcement Mode: %s", policy.EnforcementMode)
+		}
+		
 		return utils.FormatWAFPolicies(policies), nil
 	}
 

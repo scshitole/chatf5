@@ -1,24 +1,13 @@
 package prompt
 
 const (
-	WAFPolicyListTemplate = `To list WAF policies, I'll need to:
+	WAFPolicyListTemplate = `To list WAF policies and their associated virtual servers, I'll need to:
 1. Query the /mgmt/tm/asm/policies endpoint
-2. Format and display the results including:
+2. Format and display the results with focus on:
    - Name: The unique identifier of the WAF policy
    - Status: Current operational status (Active/Inactive)
-   - Type: Type of WAF policy (e.g., Security, Parent)
-   - Enforcement Mode: How policy violations are handled
-   - Virtual Servers: Associated virtual servers
-Additional Information:
-- WAF (Web Application Firewall) policies protect web applications from various attacks
-- They include:
-  * Signature-based protection against known attacks
-  * Protocol validation
-  * Input validation rules
-  * Protection against OWASP Top 10 vulnerabilities
-Commands you can use:
-- "show waf policies" - List all WAF policies
-- "show policy details VS_WAF" - Get detailed information about a specific policy`
+   - Virtual Servers: List of virtual servers where this policy is applied
+   - Enforcement Mode: How policy violations are handled (blocking/transparent)`
 
 	VirtualServerListTemplate = `To list virtual servers (VIPs), I'll need to:
 1. Query the /mgmt/tm/ltm/virtual endpoint

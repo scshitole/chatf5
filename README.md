@@ -29,16 +29,17 @@ git clone https://github.com/scshitole/chatf5.git
 cd chatf5
 ```
 
-2. Set up environment variables in your terminal:
+2. Create a `.env` file in the project root:
 ```bash
-# BIG-IP Connection Details
-export BIGIP_HOST='<BIG-IP-HOSTNAME>:8443'
-export BIGIP_USERNAME='<BIG-IP-USERNAME>'
-export BIGIP_PASSWORD='<BIG-IP-PASSWORD>'
+# Copy the .env.example file
+cp .env.example .env
 
-# OpenAI API Configuration
-export OPENAI_API_KEY='<OPENAI-API-KEY>'
+# Edit .env file with your credentials
+# Replace the placeholder values with your actual credentials
+# DO NOT commit this file to version control
 ```
+
+The `.env` file should contain your actual credentials following the format in the Environment Variables section above.
 
 3. Install Go (if not already installed):
 ```bash
@@ -54,14 +55,23 @@ go run main.go
 
 ## Environment Variables
 
-The application requires the following environment variables:
+The application requires the following environment variables to be set in your `.env` file:
 
-- `BIGIP_HOST`: The hostname/IP and port of your F5 BIG-IP instance
-- `BIGIP_USERNAME`: Your BIG-IP username
-- `BIGIP_PASSWORD`: Your BIG-IP password
-- `OPENAI_API_KEY`: Your OpenAI API key for natural language processing
+```bash
+# BIG-IP Connection Settings
+BIGIP_HOST=your-bigip-hostname:8443      # Example: bigip.example.com:8443
+BIGIP_USERNAME=your-bigip-username       # Your BIG-IP admin username
+BIGIP_PASSWORD=your-bigip-password       # Your BIG-IP admin password
 
-You can set these variables as shown in the Quick Start section above.
+# OpenAI API Configuration
+OPENAI_API_KEY=your-openai-api-key       # Get this from: https://platform.openai.com/api-keys
+```
+
+**Important Security Note:**
+- Never commit your `.env` file to version control
+- Keep your API keys and credentials secure
+- Rotate credentials regularly for security
+- Use separate credentials for development and production
 
 ## Installation
 

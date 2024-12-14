@@ -123,6 +123,17 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 		sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
 		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
 		
+		// Display Virtual Server associations prominently
+		if len(policy.VirtualServers) > 0 {
+			sb.WriteString("\nApplied to Virtual Servers:\n")
+			for _, vs := range policy.VirtualServers {
+				sb.WriteString(fmt.Sprintf("- %s\n", vs))
+			}
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString("\nNot currently applied to any Virtual Servers\n\n")
+		}
+		
 		if policy.EnforcementMode != "" {
 			sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
 			if policy.EnforcementMode == "blocking" {
