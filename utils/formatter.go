@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/f5devcentral/go-bigip"
+	"f5chat/bigip"
 )
 
 func FormatVirtualServers(vs []bigip.VirtualServer) string {
@@ -12,7 +12,7 @@ func FormatVirtualServers(vs []bigip.VirtualServer) string {
 	sb.WriteString("\n=== Virtual Servers (VIPs) ===\n")
 	
 	if len(vs) == 0 {
-		sb.WriteString("No virtual servers configured.\n")
+		sb.WriteString("\nNo virtual servers are currently configured.\n")
 		return sb.String()
 	}
 
@@ -41,7 +41,7 @@ func FormatPools(pools []bigip.Pool, poolMembers map[string][]string) string {
 	sb.WriteString("\n=== Server Pools ===\n")
 
 	if len(pools) == 0 {
-		sb.WriteString("No pools configured.\n")
+		sb.WriteString("\nNo server pools are currently configured.\n")
 		return sb.String()
 	}
 
@@ -74,32 +74,18 @@ func FormatPools(pools []bigip.Pool, poolMembers map[string][]string) string {
 func FormatNodes(nodes []bigip.Node) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== Backend Nodes ===\n")
-
+	
 	if len(nodes) == 0 {
-		sb.WriteString("No nodes configured.\n")
+		sb.WriteString("\nNo backend nodes are currently configured.\n")
 		return sb.String()
 	}
 
-	for i, n := range nodes {
+	for i, node := range nodes {
 		sb.WriteString(fmt.Sprintf("\n[%d] Node Details:\n", i+1))
 		sb.WriteString("----------------------------------------\n")
-		sb.WriteString(fmt.Sprintf("Name:        %s\n", n.Name))
-		sb.WriteString(fmt.Sprintf("Address:     %s\n", n.Address))
-		sb.WriteString(fmt.Sprintf("State:       %s\n", n.State))
-		
-		// Add connection limits if configured
-		if n.ConnectionLimit > 0 {
-			sb.WriteString(fmt.Sprintf("Conn Limit:  %d\n", n.ConnectionLimit))
-		}
-		
-		// Add dynamic ratio if configured
-		if n.DynamicRatio > 0 {
-			sb.WriteString(fmt.Sprintf("Dyn Ratio:   %d\n", n.DynamicRatio))
-		}
-		
-		if n.Description != "" {
-			sb.WriteString(fmt.Sprintf("Description: %s\n", n.Description))
-		}
+		sb.WriteString(fmt.Sprintf("Name: %s\n", node.Name))
+		sb.WriteString(fmt.Sprintf("Address: %s\n", node.Address))
+		sb.WriteString(fmt.Sprintf("State: %s\n", node.State))
 		sb.WriteString("----------------------------------------\n")
 	}
 
@@ -129,6 +115,41 @@ func FormatWAFPolicies(policies []string) string {
 	sb.WriteString("\nNote: WAF policies are configured to protect web applications ")
 	sb.WriteString("from various attacks such as SQL injection, cross-site scripting (XSS), ")
 	sb.WriteString("and other OWASP Top 10 vulnerabilities.\n")
+	sb.WriteString("\nTip: To see detailed information about a specific policy, ")
+	sb.WriteString("ask about 'policy details for [policy name]'\n")
 
+	return sb.String()
+}
+
+func FormatWAFPolicyDetails(policy *bigip.ASMPolicy) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\n=== WAF Policy Details: %s ===\n", policy.Name))
+	sb.WriteString("----------------------------------------\n")
+	
+	sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
+	sb.WriteString(fmt.Sprintf("ID: %s\n", policy.ID))
+	sb.WriteString(fmt.Sprintf("Type: %s\n", policy.Type))
+	sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
+	sb.WriteString(fmt.Sprintf("Enforcement Mode: %s\n", policy.EnforcementMode))
+	
+	if policy.Description != "" {
+		sb.WriteString(fmt.Sprintf("Description: %s\n", policy.Description))
+	}
+	
+	if policy.SignatureStaging {
+		sb.WriteString("Signature Mode: Staging\n")
+	} else {
+		sb.WriteString("Signature Mode: Production\n")
+	}
+	
+	if len(policy.VirtualServers) > 0 {
+		sb.WriteString("\nAssociated Virtual Servers:\n")
+		for _, vs := range policy.VirtualServers {
+			sb.WriteString(fmt.Sprintf("- %s\n", vs))
+		}
+	}
+	
+	sb.WriteString("\nConfiguration Path: " + policy.FullPath + "\n")
+	
 	return sb.String()
 }

@@ -61,7 +61,6 @@ func NewClient(cfg *config.Config) (*Client, error) {
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			},
 		},
-		// Enhanced connection settings
 		TLSHandshakeTimeout:   45 * time.Second,
 		ResponseHeaderTimeout: 45 * time.Second,
 		ExpectContinueTimeout: 15 * time.Second,
@@ -69,26 +68,16 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
-		ForceAttemptHTTP2:     false, // Stick to HTTP/1.1 for better compatibility
+		ForceAttemptHTTP2:     false,
 	}
 
 	log.Printf("Configuring TLS transport with custom settings...")
 	bigipClient.Transport = customTransport
 
-	// Test connection with timeout using a simple endpoint
+	// Test connection with timeout
 	log.Printf("Starting connection test to BIG-IP at %s", host)
 	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
-	log.Printf("Connection details:")
-	log.Printf("- Protocol: HTTPS")
-	log.Printf("- Host: %s", host)
-	log.Printf("- Port: %s", port)
-	log.Printf("- Username: %s", cfg.BigIPUsername)
-	log.Printf("- TLS: Enabled with InsecureSkipVerify")
-	log.Printf("- Timeout settings:")
-	log.Printf("  * TLS Handshake: 45s")
-	log.Printf("  * Response Header: 45s")
-	log.Printf("  * Connection Idle: 90s")
-
+	
 	// Create a channel for connection result
 	connectionStatus := make(chan error, 1)
 
@@ -117,12 +106,10 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			errLower := strings.ToLower(testErr.Error())
 			log.Printf("Connection attempt %d failed: %v", retry+1, testErr)
 
-			// Handle different error cases
 			switch {
 			case strings.Contains(errLower, "certificate"):
 				log.Printf("Certificate validation error - modifying TLS config and retrying...")
 				bigipClient.Transport = customTransport
-				// Immediate retry with new transport
 				retryVs, retryErr := bigipClient.VirtualServers()
 				if retryErr == nil {
 					log.Printf("Connection successful after certificate handling, found %d virtual servers", len(retryVs.VirtualServers))
@@ -130,27 +117,18 @@ func NewClient(cfg *config.Config) (*Client, error) {
 					return
 				}
 				log.Printf("Still failed after certificate handling: %v", retryErr)
-				
 			case strings.Contains(errLower, "connection refused"):
 				log.Printf("Connection refused - port %s might be blocked or BIG-IP not accepting connections", port)
-				log.Printf("Please verify:\n1. BIG-IP management port is accessible\n2. No firewall rules blocking port %s", port)
-				
 			case strings.Contains(errLower, "no such host"):
-				log.Printf("DNS resolution failed for host: %s\nPlease verify the hostname/IP is correct", host)
-				
+				log.Printf("DNS resolution failed for host: %s", host)
 			case strings.Contains(errLower, "timeout"):
-				log.Printf("Connection timed out - possible network issues:\n1. Slow network connection\n2. Firewall blocking traffic\n3. BIG-IP high load or not responding")
-				
+				log.Printf("Connection timed out - possible network issues or firewall blocking")
 			case strings.Contains(errLower, "unauthorized"):
-				log.Printf("Authentication failed - verify credentials:\n1. Username (current: %s)\n2. Password (length: %d)\n3. BIG-IP user permissions", 
-					cfg.BigIPUsername, len(cfg.BigIPPassword))
-				
+				log.Printf("Authentication failed - verify username and password")
 			default:
-				log.Printf("Unexpected error: %v\nFull error details: %#v", testErr, testErr)
+				log.Printf("Unexpected error: %v", testErr)
 			}
 		}
-
-		// If we get here, all retries failed
 		connectionStatus <- fmt.Errorf("failed to connect after %d attempts - last error: %v", maxRetries, lastErr)
 	}()
 
@@ -158,16 +136,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	select {
 	case err := <-connectionStatus:
 		if err != nil {
-			log.Printf("All connection attempts failed: %v", err)
 			return nil, fmt.Errorf("failed to connect to BIG-IP: %v", err)
 		}
 		log.Printf("Successfully connected to BIG-IP")
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("connection timeout after 30 seconds - please verify:\n1. BIG-IP host and port (%s)\n2. Network connectivity\n3. Firewall rules", cfg.BigIPHost)
+	case <-time.After(60 * time.Second):
+		return nil, fmt.Errorf("connection timeout after 60 seconds - please verify:\n1. BIG-IP host and port (%s)\n2. Network connectivity\n3. Firewall rules\n4. BIG-IP management interface status", cfg.BigIPHost)
 	}
-
-	// The first connection test was successful, no need for a second test
-	log.Println("Connection to BIG-IP established successfully")
 
 	return &Client{
 		BigIP:    bigipClient,
@@ -176,13 +150,138 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}, nil
 }
 
+// ASMPolicy represents a WAF/ASM policy in BIG-IP
+type ASMPolicy struct {
+	Name             string                 `json:"name"`
+	FullPath         string                 `json:"fullPath"`
+	ID               string                 `json:"id"`
+	Description      string                 `json:"description,omitempty"`
+	Active           bool                   `json:"active"`
+	Type             string                 `json:"type,omitempty"`
+	EnforcementMode  string                 `json:"enforcementMode,omitempty"`
+	Kind             string                 `json:"kind,omitempty"`
+	SelfLink         string                 `json:"selfLink,omitempty"`
+	SignatureSetings map[string]interface{} `json:"signatureSettings,omitempty"`
+	BlockingMode     string                 `json:"blockingMode,omitempty"`
+	SignatureStaging bool                   `json:"signatureStaging,omitempty"`
+	PlaceSignatures  bool                   `json:"placeSignaturesInStaging,omitempty"`
+	VirtualServers   []string              `json:"virtualServers,omitempty"`
+}
+
+// ASMPoliciesResponse represents the response from BIG-IP for ASM policies
+type ASMPoliciesResponse struct {
+	Items      []ASMPolicy `json:"items"`
+	Kind       string      `json:"kind"`
+	Generation int64       `json:"generation"`
+	SelfLink   string      `json:"selfLink"`
+}
+
+// GetWAFPolicies retrieves the list of WAF policies from BIG-IP
+func (c *Client) GetWAFPolicies() ([]string, error) {
+	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
+	log.Printf("Endpoint: /mgmt/tm/asm/policies")
+	log.Printf("Method: GET")
+	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
+
+	maxRetries := 3
+	retryDelay := 5 * time.Second
+	var lastErr error
+	var policies ASMPoliciesResponse
+
+	for retry := 0; retry < maxRetries; retry++ {
+		if retry > 0 {
+			log.Printf("Retry attempt %d/%d for WAF policies after %v delay...", retry+1, maxRetries, retryDelay)
+			time.Sleep(retryDelay)
+		}
+
+		req := &bigip.APIRequest{
+			Method:      "GET",
+			URL:         "mgmt/tm/asm/policies",
+			ContentType: "application/json",
+		}
+		resp, err := c.BigIP.APICall(req)
+		if err == nil {
+			if err = json.Unmarshal(resp, &policies); err == nil {
+				log.Printf("\nAPI Response received and parsed successfully")
+				log.Printf("Response Kind: %s", policies.Kind)
+				log.Printf("Generation: %d", policies.Generation)
+				break
+			}
+			log.Printf("Error parsing WAF policies response: %v", err)
+		}
+		lastErr = err
+		if retry == maxRetries-1 && err != nil {
+			log.Printf("\nERROR: Failed to fetch WAF policies")
+			log.Printf("Error Type: %T", err)
+			log.Printf("Error Message: %v", err)
+			
+			errStr := err.Error()
+			switch {
+			case strings.Contains(strings.ToLower(errStr), "unauthorized"):
+				log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
+			case strings.Contains(strings.ToLower(errStr), "connection"):
+				log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
+				log.Printf("Please verify:\n1. Network connectivity\n2. BIG-IP management interface\n3. ASM module is provisioned and licensed")
+			case strings.Contains(strings.ToLower(errStr), "not found"):
+				log.Printf("Endpoint Error: WAF/ASM endpoint not found")
+				log.Printf("Please verify ASM module is provisioned on BIG-IP")
+			default:
+				log.Printf("Unhandled WAF error - Full error: %v", err)
+			}
+			
+			return nil, fmt.Errorf("failed to get WAF policies: %v", lastErr)
+		}
+	}
+
+	var policyNames []string
+	for _, policy := range policies.Items {
+		log.Printf("\nProcessing policy:")
+		log.Printf("  Name: %s", policy.Name)
+		log.Printf("  ID: %s", policy.ID)
+		log.Printf("  Type: %s", policy.Type)
+		log.Printf("  Enforcement Mode: %s", policy.EnforcementMode)
+		policyNames = append(policyNames, policy.Name)
+	}
+
+	log.Printf("\nFound %d WAF policies", len(policyNames))
+	return policyNames, nil
+}
+
+// GetWAFPolicyDetails retrieves detailed information about a specific WAF policy
+func (c *Client) GetWAFPolicyDetails(policyName string) (*ASMPolicy, error) {
+	log.Printf("\n=== Starting GetWAFPolicyDetails Operation for policy: %s ===", policyName)
+	log.Printf("Endpoint: /mgmt/tm/asm/policies")
+	log.Printf("Method: GET")
+
+	req := &bigip.APIRequest{
+		Method:      "GET",
+		URL:         fmt.Sprintf("mgmt/tm/asm/policies?$filter=name+eq+%s", policyName),
+		ContentType: "application/json",
+	}
+
+	resp, err := c.BigIP.APICall(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get WAF policy details: %v", err)
+	}
+
+	var policiesResp ASMPoliciesResponse
+	if err := json.Unmarshal(resp, &policiesResp); err != nil {
+		return nil, fmt.Errorf("failed to parse WAF policy details: %v", err)
+	}
+
+	if len(policiesResp.Items) == 0 {
+		return nil, fmt.Errorf("WAF policy '%s' not found", policyName)
+	}
+
+	return &policiesResp.Items[0], nil
+}
+
 func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 	log.Println("\n=== Starting GetVirtualServers Operation ===")
 	log.Printf("Endpoint: /mgmt/tm/ltm/virtual")
 	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.User)
+	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
 
-	// Make the API request with detailed logging
 	log.Println("\nMaking API request to fetch virtual servers...")
 	vs, err := c.VirtualServers()
 	if err != nil {
@@ -190,18 +289,14 @@ func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 		log.Printf("Error Type: %T", err)
 		log.Printf("Error Message: %v", err)
 
-		// Enhanced error analysis
 		errStr := err.Error()
 		switch {
 		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
 			log.Printf("Authentication Error: Please verify credentials")
-			log.Printf("Expected: Username='admin', Password length=10")
 		case strings.Contains(strings.ToLower(errStr), "connection"):
 			log.Printf("Connection Error: Unable to reach BIG-IP")
-			log.Printf("Please verify network connectivity and firewall rules")
 		case strings.Contains(strings.ToLower(errStr), "certificate"):
 			log.Printf("TLS Certificate Error: Certificate validation failed")
-			log.Printf("This is expected for self-signed certificates")
 		default:
 			log.Printf("Unhandled error type - Full error: %v", err)
 		}
@@ -210,7 +305,6 @@ func (c *Client) GetVirtualServers() ([]bigip.VirtualServer, error) {
 
 	log.Println("\nAPI Response received successfully")
 
-	// Process the response with detailed logging
 	var virtualServers []bigip.VirtualServer
 	if vs != nil && vs.VirtualServers != nil {
 		count := len(vs.VirtualServers)
@@ -241,13 +335,11 @@ func (c *Client) GetPools() ([]bigip.Pool, map[string][]string, error) {
 		return nil, nil, fmt.Errorf("failed to get pools: %v", err)
 	}
 
-	// Convert *Pools to []Pool
 	var poolList []bigip.Pool
 	poolMembers := make(map[string][]string)
 
 	for _, p := range pools.Pools {
 		poolList = append(poolList, p)
-		// Get members for each pool
 		members, err := c.PoolMembers(p.Name)
 		if err != nil {
 			fmt.Printf("Warning: failed to get members for pool %s: %v\n", p.Name, err)
@@ -270,73 +362,9 @@ func (c *Client) GetNodes() ([]bigip.Node, error) {
 		return nil, fmt.Errorf("failed to get nodes: %v", err)
 	}
 
-	// Convert *Nodes to []Node
 	var nodeList []bigip.Node
 	for _, n := range nodes.Nodes {
 		nodeList = append(nodeList, n)
 	}
 	return nodeList, nil
-}
-// ASMPolicy represents a WAF/ASM policy in BIG-IP
-type ASMPolicy struct {
-	Name          string `json:"name"`
-	FullPath      string `json:"fullPath"`
-	ID            string `json:"id"`
-	Description   string `json:"description,omitempty"`
-	Active        bool   `json:"active"`
-	Type          string `json:"type,omitempty"`
-	EnforcementMode string `json:"enforcementMode,omitempty"`
-	Kind          string `json:"kind,omitempty"`
-	SelfLink      string `json:"selfLink,omitempty"`
-}
-
-// ASMPoliciesResponse represents the response from BIG-IP for ASM policies
-type ASMPoliciesResponse struct {
-	Items []ASMPolicy `json:"items"`
-	Kind  string     `json:"kind"`
-	Generation int64 `json:"generation"`
-	SelfLink string  `json:"selfLink"`
-}
-
-// GetWAFPolicies retrieves the list of WAF policies from BIG-IP
-func (c *Client) GetWAFPolicies() ([]string, error) {
-	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
-	log.Printf("Endpoint: /mgmt/tm/asm/policies")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-
-	var policies ASMPoliciesResponse
-	req := &bigip.APIRequest{
-		Method:      "GET",
-		URL:         "mgmt/tm/asm/policies",
-		ContentType: "application/json",
-	}
-	resp, err := c.BigIP.APICall(req)
-	if err != nil {
-		log.Printf("\nERROR: Failed to fetch WAF policies")
-		log.Printf("Error Type: %T", err)
-		log.Printf("Error Message: %v", err)
-		return nil, fmt.Errorf("failed to get WAF policies: %v", err)
-	}
-	err = json.Unmarshal(resp, &policies)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse WAF policies response: %v", err)
-	}
-
-	log.Printf("\nAPI Response received successfully")
-	log.Printf("Response Kind: %s", policies.Kind)
-	log.Printf("Generation: %d", policies.Generation)
-
-	var policyNames []string
-	for _, policy := range policies.Items {
-		log.Printf("\nProcessing policy:")
-		log.Printf("  Name: %s", policy.Name)
-		log.Printf("  ID: %s", policy.ID)
-		log.Printf("  Type: %s", policy.Type)
-		log.Printf("  Enforcement Mode: %s", policy.EnforcementMode)
-		policyNames = append(policyNames, policy.Name)
-	}
-
-	log.Printf("\nFound %d WAF policies", len(policyNames))
-	return policyNames, nil
 }

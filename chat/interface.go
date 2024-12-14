@@ -62,6 +62,31 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 		"security policy",
 	}) {
 		log.Printf("Detected WAF policy query request: %s", originalQuery)
+		
+		// Check if looking for a specific policy
+		if strings.Contains(lowerResponse, "details") && strings.Contains(lowerResponse, "policy") {
+			// Extract policy name from the query
+			words := strings.Fields(lowerResponse)
+			var policyName string
+			for i, word := range words {
+				if word == "policy" && i+1 < len(words) {
+					policyName = words[i+1]
+					break
+				}
+			}
+			
+			if policyName != "" {
+				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
+				if err != nil {
+					log.Printf("Error fetching WAF policy details: %v", err)
+					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
+				}
+				log.Printf("Successfully retrieved WAF policy details for %s", policyName)
+				return utils.FormatWAFPolicyDetails(policy), nil
+			}
+		}
+		
+		// Default: list all policies
 		policies, err := i.bigipClient.GetWAFPolicies()
 		if err != nil {
 			log.Printf("Error fetching WAF policies: %v", err)
