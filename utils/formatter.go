@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	gobigip "github.com/f5devcentral/go-bigip"
 	"f5chat/bigip"
 )
 
@@ -52,7 +53,6 @@ func FormatPools(pools []bigip.Pool, poolMembers map[string][]string) string {
 		sb.WriteString(fmt.Sprintf("Load Balance: %s\n", p.LoadBalancingMode))
 		sb.WriteString(fmt.Sprintf("Monitor:      %s\n", p.Monitor))
 		
-		// Display pool members
 		sb.WriteString("\nPool Members:\n")
 		if members, ok := poolMembers[p.Name]; ok && len(members) > 0 {
 			for j, m := range members {
@@ -83,15 +83,14 @@ func FormatNodes(nodes []bigip.Node) string {
 	for i, node := range nodes {
 		sb.WriteString(fmt.Sprintf("\n[%d] Node Details:\n", i+1))
 		sb.WriteString("----------------------------------------\n")
-		sb.WriteString(fmt.Sprintf("Name: %s\n", node.Name))
+		sb.WriteString(fmt.Sprintf("Name:    %s\n", node.Name))
 		sb.WriteString(fmt.Sprintf("Address: %s\n", node.Address))
-		sb.WriteString(fmt.Sprintf("State: %s\n", node.State))
+		sb.WriteString(fmt.Sprintf("State:   %s\n", node.State))
 		sb.WriteString("----------------------------------------\n")
 	}
 
 	return sb.String()
 }
-
 
 func FormatWAFPolicies(policies []string) string {
 	var sb strings.Builder

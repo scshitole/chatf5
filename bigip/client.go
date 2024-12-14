@@ -13,10 +13,26 @@ import (
 	"f5chat/config"
 )
 
+// Client wraps the F5 BIG-IP client with additional functionality
 type Client struct {
 	*bigip.BigIP
 	Username string
 	Password string
+}
+
+// VirtualServer represents a BIG-IP virtual server configuration
+type VirtualServer struct {
+	*bigip.VirtualServer
+}
+
+// Pool represents a BIG-IP server pool configuration
+type Pool struct {
+	*bigip.Pool
+}
+
+// Node represents a BIG-IP backend node configuration
+type Node struct {
+	*bigip.Node
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
