@@ -69,10 +69,7 @@ type WAFPolicy struct {
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
-	log.Printf("Raw BIG-IP host from environment: %s", cfg.BigIPHost)
-
 	// Parse host and port according to iControl REST API specs
-	// Reference: iControl REST API User Guide 14.1.0, Chapter 2: REST API Authentication
 	hostParts := strings.Split(strings.TrimSpace(cfg.BigIPHost), ":")
 	host := hostParts[0]
 	port := "443" // default HTTPS port per F5 documentation
@@ -80,12 +77,8 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		port = hostParts[1]
 	}
 
-	log.Printf("Parsed host components - Host: %s, Port: %s", host, port)
-
 	// Construct proper URL with required format: https://<hostname>/mgmt/tm/<module>
-	// Reference: iControl REST API User Guide 14.1.0, Chapter 3: URI Format and Resources
 	baseURL := fmt.Sprintf("https://%s:%s", host, port)
-	log.Printf("Constructed base URL: %s", baseURL)
 
 	// Create configuration for BIG-IP session
 	config := &bigip.Config{
@@ -94,11 +87,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		Password: cfg.BigIPPassword,
 	}
 
-	log.Printf("Creating BIG-IP session with configuration: Address=%s, Username=%s",
-		config.Address, config.Username)
-
 	bigipClient := bigip.NewSession(config)
-	log.Printf("BIG-IP session created, attempting API connection...")
 
 	// Set custom transport with enhanced TLS configuration for HTTPS
 	customTransport := &http.Transport{
@@ -126,8 +115,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	bigipClient.Transport = customTransport
 
 	// Test connection with timeout
-	log.Printf("Starting connection test to BIG-IP at %s", host)
-	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
+	log.Printf("Testing connection to BIG-IP...")
 
 	// Create a channel for connection result
 	connectionStatus := make(chan error, 1)
@@ -153,9 +141,9 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			}
 
 			// Try to fetch virtual servers as a connection test
-			testVs, testErr := bigipClient.VirtualServers()
-			if testErr == nil {
-				log.Printf("Connection successful on attempt %d, found %d virtual servers", retry+1, len(testVs.VirtualServers))
+			vs, testErr := bigipClient.VirtualServers()
+			if testErr == nil && vs != nil {
+				log.Printf("Connected to BIG-IP successfully")
 				connectionStatus <- nil
 				return
 			}
@@ -238,12 +226,6 @@ type ASMPoliciesResponse struct {
 // Required Role: Administrator or Resource Administrator
 // Response Format: Collection of ASM policy objects
 func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
-	log.Printf("\n=== Starting GetWAFPolicies Operation ===")
-	log.Printf("Endpoint: /mgmt/tm/asm/policies")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-	log.Printf("Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management")
-
 	maxRetries := 3
 	baseDelay := 5 * time.Second
 	maxDelay := 30 * time.Second
@@ -384,13 +366,6 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 // Endpoint: /mgmt/tm/asm/policies
 // Method: GET with policy name filter
 func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
-	log.Printf("\n=== Starting GetWAFPolicyDetails Operation for policy: %s ===", policyName)
-	log.Printf("Endpoint: /mgmt/tm/asm/policies")
-	log.Printf("Method: GET")
-	log.Printf("Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-	log.Printf("Searching for policy with name: %s", policyName)
-	log.Printf("Using iControl REST API specification from F5 documentation")
 	if policyName == "" {
 		return nil, fmt.Errorf("policy name cannot be empty")
 	}
@@ -513,60 +488,33 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 }
 
 func (c *Client) GetVirtualServers() ([]VirtualServer, error) {
-	log.Println("\n=== Starting GetVirtualServers Operation ===")
-	log.Printf("Endpoint: /mgmt/tm/ltm/virtual")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-
-	log.Println("\nMaking API request to fetch virtual servers...")
 	vs, err := c.VirtualServers()
 	if err != nil {
-		log.Printf("\nERROR: Failed to fetch virtual servers")
-		log.Printf("Error Type: %T", err)
-		log.Printf("Error Message: %v", err)
-
 		errStr := err.Error()
 		switch {
 		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
-			log.Printf("Authentication Error: Please verify credentials")
+			return nil, fmt.Errorf("authentication failed: please verify credentials")
 		case strings.Contains(strings.ToLower(errStr), "connection"):
-			log.Printf("Connection Error: Unable to reach BIG-IP")
+			return nil, fmt.Errorf("connection error: unable to reach BIG-IP")
 		case strings.Contains(strings.ToLower(errStr), "certificate"):
-			log.Printf("TLS Certificate Error: Certificate validation failed")
+			return nil, fmt.Errorf("TLS certificate error: certificate validation failed")
 		case strings.Contains(strings.ToLower(errStr), "no such host"):
-			log.Printf("DNS Error: Unable to resolve BIG-IP hostname")
+			return nil, fmt.Errorf("DNS error: unable to resolve BIG-IP hostname")
 		case strings.Contains(strings.ToLower(errStr), "timeout"):
-			log.Printf("Timeout Error: Request took too long to complete")
+			return nil, fmt.Errorf("timeout error: request took too long to complete")
 		default:
-			log.Printf("Unhandled error type - Full error: %v", err)
+			return nil, fmt.Errorf("API request failed: %v", err)
 		}
-		return nil, fmt.Errorf("API request failed: %v", err)
 	}
-
-	log.Println("\nAPI Response received successfully")
 
 	var virtualServers []VirtualServer
 	if vs != nil && vs.VirtualServers != nil {
-		count := len(vs.VirtualServers)
-		log.Printf("\nFound %d virtual server(s)", count)
-
-		for i, v := range vs.VirtualServers {
-			log.Printf("\nVirtual Server [%d/%d]:", i+1, count)
-			log.Printf("  Name:        %s", v.Name)
-			log.Printf("  Destination: %s", v.Destination)
-			log.Printf("  Pool:        %s", v.Pool)
-			log.Printf("  Status:      %s", map[bool]string{true: "Enabled", false: "Disabled"}[v.Enabled])
+		for _, v := range vs.VirtualServers {
 			vs := v // Create a copy to avoid referencing the loop variable
 			virtualServers = append(virtualServers, VirtualServer{VirtualServer: &vs})
 		}
-	} else {
-		log.Printf("\nWARNING: No virtual servers found")
-		log.Printf("Response validation:")
-		log.Printf("- vs object is nil: %v", vs == nil)
-		log.Printf("- vs.VirtualServers is nil: %v", vs != nil && vs.VirtualServers == nil)
 	}
 
-	log.Printf("GetVirtualServers operation completed. Returning %d virtual servers", len(virtualServers))
 	return virtualServers, nil
 }
 
@@ -603,11 +551,6 @@ func (c *Client) GetPools() ([]Pool, map[string][]string, error) {
 // Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management
 // Endpoint: /mgmt/tm/asm/signature-statuses
 func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, error) {
-	log.Printf("\n=== Starting GetPolicySignatureStatus Operation for policy ID: %s ===", policyID)
-	log.Printf("Endpoint: /mgmt/tm/asm/signature-statuses")
-	log.Printf("Method: GET")
-	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
-
 	if policyID == "" {
 		return nil, fmt.Errorf("policy ID cannot be empty")
 	}
