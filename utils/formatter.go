@@ -13,6 +13,7 @@ type (
 	Pool         = bigip.Pool
 	Node         = bigip.Node
 	WAFPolicy    = bigip.WAFPolicy
+	SignatureStatus = bigip.SignatureStatus
 )
 
 func FormatVirtualServers(vs []VirtualServer) string {
@@ -99,8 +100,6 @@ func FormatNodes(nodes []Node) string {
 	return sb.String()
 }
 
-// FormatWAFPolicies formats WAF/ASM policies according to iControl REST API structure
-// Reference: iControl REST API v14.1.0, Chapter 7: Application Security Management
 func FormatWAFPolicies(policies []*WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policies ===\n")
@@ -126,7 +125,6 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 		sb.WriteString(fmt.Sprintf("Name: %s\n", policy.Name))
 		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{true: "Active", false: "Inactive"}[policy.Active]))
 		
-		// Display Virtual Server associations prominently
 		if len(policy.VirtualServers) > 0 {
 			sb.WriteString("\nApplied to Virtual Servers:\n")
 			for _, vs := range policy.VirtualServers {
@@ -178,7 +176,7 @@ func FormatWAFPolicies(policies []*WAFPolicy) string {
 	return sb.String()
 }
 
-func FormatWAFPolicyDetails(policy *bigip.WAFPolicy) string {
+func FormatWAFPolicyDetails(policy *WAFPolicy) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF (Web Application Firewall) Policy Details ===\n")
 	sb.WriteString("Reference: iControl REST API v14.1.0, Chapter 7: Application Security Management\n")
@@ -256,7 +254,6 @@ func FormatWAFPolicyDetails(policy *bigip.WAFPolicy) string {
 	return sb.String()
 }
 
-// FormatSignatureStatus formats the signature status information for display
 func FormatSignatureStatus(signatures []bigip.SignatureStatus) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== WAF Policy Signature Status ===\n")
@@ -273,35 +270,51 @@ func FormatSignatureStatus(signatures []bigip.SignatureStatus) string {
 	for i, sig := range signatures {
 		sb.WriteString(fmt.Sprintf("\n[%d] Signature Details:\n", i+1))
 		sb.WriteString("----------------------------------------\n")
-		sb.WriteString(fmt.Sprintf("Name: %s\n", sig.Name))
+		sb.WriteString(fmt.Sprintf("Name: %s\n", sig.SignatureName))
 		sb.WriteString(fmt.Sprintf("Signature ID: %s\n", sig.SignatureID))
-		sb.WriteString(fmt.Sprintf("Status: %s\n", map[bool]string{
-			true:  "Enabled",
-			false: "Disabled",
+		
+		// Status section with enhanced formatting
+		sb.WriteString("\nStatus:\n")
+		sb.WriteString(fmt.Sprintf("• Enabled:  %s\n", map[bool]string{
+			true:  "Yes ✓",
+			false: "No ✗",
 		}[sig.Enabled]))
-		sb.WriteString(fmt.Sprintf("Staging: %s\n", map[bool]string{
+		sb.WriteString(fmt.Sprintf("• Staging:  %s\n", map[bool]string{
 			true:  "Yes (Learning Mode)",
-			false: "No (Enforcement Mode)",
-		}[sig.Staging]))
-		sb.WriteString(fmt.Sprintf("Blocking: %s\n", map[bool]string{
-			true:  "Enabled (Violations are blocked)",
-			false: "Disabled (Monitoring only)",
-		}[sig.BlockingEnabled]))
+			false: "No (Production Mode)",
+		}[sig.PerformStaging]))
+		sb.WriteString(fmt.Sprintf("• Blocking: %s\n", map[bool]string{
+			true:  "Active (Violations Blocked)",
+			false: "Inactive (Monitoring Only)",
+		}[sig.Block]))
 
+		// Policy context information
+		if sig.PolicyName != "" {
+			sb.WriteString(fmt.Sprintf("\nPolicy Context:\n"))
+			sb.WriteString(fmt.Sprintf("• Policy: %s\n", sig.PolicyName))
+		}
+		if sig.Context != "" {
+			sb.WriteString(fmt.Sprintf("• Context: %s\n", sig.Context))
+		}
+
+		// Additional properties section
+		sb.WriteString("\nProperties:\n")
 		if sig.SignatureType != "" {
-			sb.WriteString(fmt.Sprintf("Type: %s\n", sig.SignatureType))
+			sb.WriteString(fmt.Sprintf("• Type:     %s\n", sig.SignatureType))
 		}
 		if sig.AccuracyLevel != "" {
-			sb.WriteString(fmt.Sprintf("Accuracy: %s\n", sig.AccuracyLevel))
+			sb.WriteString(fmt.Sprintf("• Accuracy: %s\n", sig.AccuracyLevel))
 		}
 		if sig.RiskLevel != "" {
-			sb.WriteString(fmt.Sprintf("Risk Level: %s\n", sig.RiskLevel))
+			sb.WriteString(fmt.Sprintf("• Risk:     %s\n", sig.RiskLevel))
 		}
+
+		// Description section if available
 		if sig.Description != "" {
-			sb.WriteString(fmt.Sprintf("\nDescription: %s\n", sig.Description))
+			sb.WriteString("\nDescription:\n")
+			sb.WriteString(fmt.Sprintf("%s\n", sig.Description))
 		}
 		sb.WriteString("----------------------------------------\n")
 	}
-
 	return sb.String()
 }

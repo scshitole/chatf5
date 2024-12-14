@@ -38,15 +38,17 @@ type Node struct {
 // WAFPolicy represents a BIG-IP WAF (ASM) policy
 type SignatureStatus struct {
 	ID              string `json:"id"`
-	Name            string `json:"name"`
 	SignatureID     string `json:"signatureId"`
+	SignatureName   string `json:"signatureName"`
 	Enabled         bool   `json:"enabled"`
-	Staging         bool   `json:"performStaging"`
-	BlockingEnabled bool   `json:"block"`
+	PerformStaging  bool   `json:"performStaging"`
+	Block           bool   `json:"block"`
 	Description     string `json:"description,omitempty"`
 	SignatureType   string `json:"signatureType,omitempty"`
 	AccuracyLevel   string `json:"accuracy,omitempty"`
-	RiskLevel       string `json:"risk,omitempty"`
+	RiskLevel       string `json:"riskLevel,omitempty"`
+	PolicyName      string `json:"policyName,omitempty"`
+	Context         string `json:"context,omitempty"`
 }
 
 type WAFPolicy struct {
@@ -599,10 +601,10 @@ func (c *Client) GetPools() ([]Pool, map[string][]string, error) {
 
 // GetPolicySignatureStatus retrieves signature status information for a specific WAF policy
 // Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management
-// Endpoint: /mgmt/tm/asm/policies/<policy_id>/signatures
+// Endpoint: /mgmt/tm/asm/signature-statuses
 func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, error) {
 	log.Printf("\n=== Starting GetPolicySignatureStatus Operation for policy ID: %s ===", policyID)
-	log.Printf("Endpoint: /mgmt/tm/asm/policies/%s/signatures", policyID)
+	log.Printf("Endpoint: /mgmt/tm/asm/signature-statuses")
 	log.Printf("Method: GET")
 	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
 
@@ -617,7 +619,7 @@ func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, e
 	var signatures SignatureResponse
 	req := &bigip.APIRequest{
 		Method:      "GET",
-		URL:         fmt.Sprintf("mgmt/tm/asm/policies/%s/signatures", policyID),
+		URL:         "mgmt/tm/asm/signature-statuses",
 		ContentType: "application/json",
 	}
 
@@ -637,9 +639,9 @@ func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, e
 	for i, sig := range signatures.Items {
 		log.Printf("Signature [%d]:", i+1)
 		log.Printf("  ID: %s", sig.SignatureID)
-		log.Printf("  Name: %s", sig.Name)
+		log.Printf("  Name: %s", sig.SignatureName)
 		log.Printf("  Enabled: %v", sig.Enabled)
-		log.Printf("  Staging: %v", sig.Staging)
+		log.Printf("  Staging: %v", sig.PerformStaging)
 	}
 
 	return signatures.Items, nil

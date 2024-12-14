@@ -27,22 +27,17 @@ Reference: iControl REST API User Guide 14.1.0
      * Health state monitoring
 
 3. WAF Policy Management:
-   - Policy listing and details
-   - Virtual server associations
-   - Security settings viewing
-   - Enforcement mode status
+   - Policy listing and details (endpoint: /mgmt/tm/asm/policies)
+   - Virtual server associations and status
+   - Security settings and enforcement modes
+   - Policy state monitoring (active/inactive)
+   - Detailed policy information retrieval
 
 4. Security Features:
    - TLS 1.2+ support
    - Certificate validation
    - Secure credential handling
    - Detailed audit logging
-
-5. Technical Capabilities:
-   - REST API integration
-   - Automatic retry mechanisms
-   - Error handling and recovery
-   - Comprehensive logging system
 
 ## Prerequisites
 
@@ -59,155 +54,118 @@ git clone https://github.com/scshitole/chatf5.git
 cd chatf5
 ```
 
-2. Create a `.env` file in the project root:
+2. Create and configure environment:
 ```bash
-# Copy the .env.example file
+# Copy the example environment file
 cp .env.example .env
 
-# Edit .env file with your credentials
-# Replace the placeholder values with your actual credentials
-# DO NOT commit this file to version control
+# Edit .env with your credentials
+# DO NOT commit the .env file
 ```
 
-The `.env` file should contain your actual credentials following the format in the Environment Variables section above.
-
-3. Install Go (if not already installed):
-```bash
-brew install go  # On macOS using Homebrew
-```
-
-4. Install dependencies and run:
+3. Install dependencies and run:
 ```bash
 go mod download
-go mod verify
 go run main.go
 ```
 
 ## Environment Variables
 
-The application requires the following environment variables to be set in your `.env` file. Reference: iControl REST API User Guide 14.1.0, Chapter 2: REST API Authentication.
+Configure these in your `.env` file (see `.env.example` for template):
 
 ```bash
 # BIG-IP Connection Settings
-BIGIP_HOST=<hostname>:<port>       # Example: bigip.example.com:8443
-                                  # Port 8443 is the default HTTPS management port
-BIGIP_USERNAME=<username>         # BIG-IP admin or user with appropriate role
-                                  # Requires minimum "Resource Admin" role
-BIGIP_PASSWORD=<password>         # BIG-IP user's password
-                                  # Use strong passwords with special characters
+BIGIP_HOST=bigip.example.com:8443    # Your BIG-IP hostname and management port
+                                     # Default management port is 8443 for HTTPS
+BIGIP_USERNAME=admin                 # BIG-IP username with appropriate permissions
+                                     # Requires minimum "Resource Administrator" role
+BIGIP_PASSWORD=your-secure-password  # BIG-IP password (use strong password)
+                                     # Minimum 8 characters with mixed case and symbols
 
 # OpenAI API Configuration
-OPENAI_API_KEY=<api-key>         # OpenAI API key for NLP processing
-                                  # Get this from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your-api-key-here     # Your OpenAI API key
+                                     # Get from: https://platform.openai.com/
 ```
 
-**Important Security Notes:**
+**Security Requirements:**
 1. Environment File Security:
-   - Never commit `.env` file to version control
-   - Add `.env` to your `.gitignore` file
-   - Keep a sanitized `.env.example` for reference
+   - Never commit `.env` to version control
+   - Keep `.env.example` as a template only
+   - Secure storage of actual credentials
+   - Regular credential rotation
 
-2. BIG-IP Access Security:
-   - Use HTTPS (port 8443) for management access
-   - Create dedicated API user accounts
-   - Apply proper role-based access control (RBAC)
-   - Refer to F5 documentation for security best practices
-
-3. Credential Management:
-   - Rotate credentials regularly
+2. Access Control:
+   - Use HTTPS (port 8443) for management
+   - Implement proper RBAC on BIG-IP
+   - Monitor API access logs
    - Use strong passwords with special characters
-   - Keep API keys and credentials secure
-   - Use separate credentials for development and production
-   - Monitor and audit API access regularly
 
-## Installation
-
-1. Install dependencies:
-```bash
-go mod download
-```
-
-2. Verify the installation:
-```bash
-go mod verify
-```
-
-## Running the Application
-
-Start the application:
-```bash
-go run main.go
-```
+3. API Security:
+   - Protect API keys and credentials
+   - Regular key rotation
+   - Monitor API usage
+   - Keep OpenAI API key secure
 
 ## Usage Examples
 
-The application supports natural language queries based on iControl REST API endpoints. Here are some examples:
+The interface supports natural language queries. Examples:
 
-1. Virtual Server Management (Endpoint: /mgmt/tm/ltm/virtual):
+1. Virtual Server Management:
 ```
-You: Show me all virtual servers
-You: List the VIPs and their status
-You: What virtual servers are currently enabled?
-You: Display VIPs with their pools
-```
-
-2. Pool Management (Endpoint: /mgmt/tm/ltm/pool):
-```
-You: List all pools and their members
-You: Show me the pool health status
-You: What's the load balancing method for each pool?
-You: Display pools with their monitoring settings
+You: Show all virtual servers
+You: List VIPs and their status
+You: Display enabled virtual servers
 ```
 
-3. Node Management (Endpoint: /mgmt/tm/ltm/node):
+2. Pool Management:
 ```
-You: Display all backend nodes
-You: Show node health status
-You: List all nodes and their addresses
-You: What's the current state of our nodes?
+You: List all pools and members
+You: Show pool health status
+You: Display pool monitoring settings
+```
+
+3. Node Management:
+```
+You: Show all backend nodes
+You: Display node health status
+You: List node addresses
 ```
 
 4. WAF Policy Management (Endpoint: /mgmt/tm/asm/policies):
 ```
-You: List all WAF policies
-You: Show policy details for demo
-You: Display WAF policies and their virtual servers
-You: What's the enforcement mode of our WAF policies?
+You: List WAF policies                    # Lists all WAF policies
+You: Show policy details for demo         # Shows detailed configuration
+You: Display WAF virtual server mappings  # Shows policy-VS associations
+You: What's the enforcement mode?         # Shows policy enforcement status
 ```
 
-Each command interfaces with specific BIG-IP REST endpoints and returns formatted, human-readable responses. For more details on the API endpoints, refer to the iControl REST API documentation.
+Reference: iControl REST API Guide 14.1.0
+- Endpoint: /mgmt/tm/asm/policies
+- Authentication: Basic Auth
+- Protocol: HTTPS required
+- Content-Type: application/json
 
 ## Project Structure
 
 ```
 .
 ├── bigip/         # BIG-IP client implementation
-│   └── client.go  # REST API client with retry logic
 ├── chat/          # Chat interface logic
-│   └── interface.go # Natural language command processing
 ├── config/        # Configuration management
-│   └── config.go  # Environment and settings handler
-├── llm/           # LLM (OpenAI) integration
-│   └── openai.go  # OpenAI API client
-├── prompt/        # Prompt templates
-│   └── templates.go # System prompts and templates
+├── llm/           # OpenAI integration
+├── prompt/        # System prompts
 ├── utils/         # Utility functions
-│   └── formatter.go # Output formatting
-├── main.go        # Application entry point
-├── setup.sh       # Environment setup script
-├── .env.example   # Environment template
+├── main.go        # Entry point
 └── README.md      # Documentation
 ```
-
-Each component is designed according to the iControl REST API architecture, ensuring proper separation of concerns and maintainable code structure.
 
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+2. Create feature branch (`git checkout -b feature/NewFeature`)
+3. Commit changes (`git commit -m 'Add NewFeature'`)
+4. Push to branch (`git push origin feature/NewFeature`)
+5. Open Pull Request
 
 ## License
 

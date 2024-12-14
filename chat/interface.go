@@ -96,22 +96,36 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 			log.Printf("Found policy name in query: %s", policyName)
 
 			// Check if requesting signature status
-			if strings.Contains(strings.ToLower(originalQuery), "signature") {
+			if containsAny(strings.ToLower(originalQuery), []string{
+				"signature", "signatures", "attack signatures",
+				"security signatures", "waf signatures",
+			}) {
+				log.Printf("Detected signature status query for policy: %s", policyName)
+				
 				// First get policy details to get the policy ID
 				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
 				if err != nil {
 					log.Printf("Error fetching WAF policy details: %v", err)
-					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
+					return "", fmt.Errorf("failed to fetch WAF policy details for signatures: %v\nPlease verify:\n1. Policy name is correct\n2. Policy exists and is accessible\n3. You have necessary permissions", err)
+				}
+
+				if policy.ID == "" {
+					return "", fmt.Errorf("policy '%s' found but has no ID. This is unexpected - please verify policy configuration", policyName)
 				}
 
 				// Use policy ID to get signature status
 				signatures, err := i.bigipClient.GetPolicySignatureStatus(policy.ID)
 				if err != nil {
 					log.Printf("Error fetching signature status: %v", err)
-					return "", fmt.Errorf("failed to fetch signature status: %v", err)
+					return "", fmt.Errorf("failed to fetch signature status: %v\nTroubleshooting steps:\n1. Verify policy is active\n2. Check ASM module status\n3. Confirm signature set is configured", err)
 				}
 
-				log.Printf("Successfully retrieved signature status for policy: %s", policyName)
+				if len(signatures) == 0 {
+					log.Printf("No signatures found for policy: %s", policyName)
+					return "No signatures found for this policy. This could mean:\n1. The policy has no signature sets configured\n2. All signatures are disabled\n3. The policy is not using signature-based protection", nil
+				}
+
+				log.Printf("Successfully retrieved %d signatures for policy: %s", len(signatures), policyName)
 				return utils.FormatSignatureStatus(signatures), nil
 			}
 
