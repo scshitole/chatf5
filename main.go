@@ -58,44 +58,23 @@ func main() {
 
 	// Test WAF Policies with Virtual Server Associations
 	log.Println("\n=== Starting WAF Policy and Virtual Server Association Test ===")
-	log.Println("Step 1: Testing WAF/ASM module availability...")
-	testQueries := []string{
-		"list the WAF policy and the virtual server on which the policy is applied",
-		"show WAF policies with their virtual servers",
-		"display all WAF policy to virtual server mappings",
+	log.Println("Testing specific WAF policy details - 'demo' policy...")
+	
+	// Test specific policy details for 'demo'
+	detailResponse, err := chatInterface.ProcessQuery("show policy details for demo")
+	if err != nil {
+		log.Printf("Error fetching demo policy details: %v\n", err)
+		log.Printf("\nTroubleshooting Steps:")
+		log.Printf("1. Verify ASM module is provisioned")
+		log.Printf("2. Check user permissions for ASM policy access")
+		log.Printf("3. Verify 'demo' policy exists")
+		log.Printf("4. Confirm API endpoint accessibility")
+	} else {
+		log.Printf("Successfully retrieved WAF policy details")
+		fmt.Printf("\nDetailed Policy Information:\n%s\n", detailResponse)
 	}
 	
-	for _, query := range testQueries {
-		log.Printf("\nTesting query: %s", query)
-		wafResponse, err := chatInterface.ProcessQuery(query)
-		if err != nil {
-			log.Printf("Error with WAF policies test: %v\n", err)
-			log.Printf("WAF Error Details: %+v\n", err)
-			log.Printf("\nTroubleshooting Steps:")
-			log.Printf("1. Verify ASM module is provisioned")
-			log.Printf("2. Check user permissions for ASM policy access")
-			log.Printf("3. Confirm BIG-IP version supports ASM/WAF features")
-			log.Printf("4. Verify virtual server associations are accessible")
-			continue
-		}
-		
-		log.Printf("WAF policies and virtual server associations test completed successfully")
-		fmt.Printf("\nBIG-IP WAF Policies and Their Virtual Server Associations:\n%s\n", wafResponse)
-		
-		// On successful query, test specific policy details
-		if strings.Contains(wafResponse, "VS_WAF") {
-			log.Printf("\nStep 2: Testing specific WAF policy details with virtual server bindings...")
-			detailResponse, detailErr := chatInterface.ProcessQuery("show policy details VS_WAF")
-			if detailErr != nil {
-				log.Printf("Note: Could not fetch detailed policy information: %v", detailErr)
-			} else {
-				log.Printf("Successfully retrieved WAF policy details with virtual server bindings")
-				fmt.Printf("\nDetailed Policy Information:\n%s\n", detailResponse)
-			}
-			break // Exit after successful test
-		}
-	}
-	log.Println("=== WAF Policy and Virtual Server Association Test Complete ===\n")
+	log.Println("=== WAF Policy Test Complete ===\n")
 	
 
 	// Then continue with the normal interactive loop

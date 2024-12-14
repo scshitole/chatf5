@@ -69,36 +69,61 @@ func (i *Interface) executeOperation(llmResponse string, originalQuery string) (
 
 			log.Printf("Detected request for specific WAF policy details")
 
-			// Extract policy name from the query, handling both numeric and name-based references
-			query := strings.ToLower(originalQuery)
+			// Check for specific policy name in the query
 			var policyName string
-
-			if strings.Contains(query, "demo") {
+			if strings.Contains(strings.ToLower(originalQuery), "demo") {
 				policyName = "demo"
-			} else if strings.Contains(query, "vs_waf") {
-				policyName = "VS_WAF"
+				log.Printf("Found explicit policy name in query: demo")
 			} else {
-				// Try to extract the last word as policy name
-				parts := strings.Fields(query)
-				if len(parts) > 0 {
-					policyName = parts[len(parts)-1]
+				// Extract policy name from query
+				words := strings.Fields(originalQuery)
+				for i := len(words) - 1; i >= 0; i-- {
+					word := words[i]
+					if !strings.Contains(strings.ToLower(word), "policy") && 
+					   !strings.Contains(strings.ToLower(word), "details") &&
+					   !strings.Contains(strings.ToLower(word), "show") {
+						policyName = word
+						log.Printf("Found policy name in query: %s", policyName)
+						break
+					}
 				}
 			}
 
 			if policyName == "" {
-				return "", fmt.Errorf("could not determine policy name from query")
+				return "", fmt.Errorf("could not determine policy name from query. Please specify the policy name, for example: 'show policy details for demo'")
 			}
 
 			log.Printf("Found policy name in query: %s", policyName)
 
-			if policyName != "" {
+			// Check if requesting signature status
+			if strings.Contains(strings.ToLower(originalQuery), "signature") {
+				// First get policy details to get the policy ID
+				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
+				if err != nil {
+					log.Printf("Error fetching WAF policy details: %v", err)
+					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
+				}
+
+				// Use policy ID to get signature status
+				signatures, err := i.bigipClient.GetPolicySignatureStatus(policy.ID)
+				if err != nil {
+					log.Printf("Error fetching signature status: %v", err)
+					return "", fmt.Errorf("failed to fetch signature status: %v", err)
+				}
+
+				log.Printf("Successfully retrieved signature status for policy: %s", policyName)
+				return utils.FormatSignatureStatus(signatures), nil
+			}
+
+			// Regular policy details
+			if len(policyName) > 0 {
 				log.Printf("Attempting to fetch details for WAF policy: %s", policyName)
 				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
 				if err != nil {
 					log.Printf("Error fetching WAF policy details: %v", err)
 					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
 				}
-				log.Printf("Successfully retrieved WAF policy details for %s", policyName)
+				log.Printf("Successfully retrieved WAF policy details")
 				return utils.FormatWAFPolicyDetails(policy), nil
 			}
 		}

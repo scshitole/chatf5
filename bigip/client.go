@@ -36,6 +36,19 @@ type Node struct {
 }
 
 // WAFPolicy represents a BIG-IP WAF (ASM) policy
+type SignatureStatus struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	SignatureID     string `json:"signatureId"`
+	Enabled         bool   `json:"enabled"`
+	Staging         bool   `json:"performStaging"`
+	BlockingEnabled bool   `json:"block"`
+	Description     string `json:"description,omitempty"`
+	SignatureType   string `json:"signatureType,omitempty"`
+	AccuracyLevel   string `json:"accuracy,omitempty"`
+	RiskLevel       string `json:"risk,omitempty"`
+}
+
 type WAFPolicy struct {
 	Name             string                 `json:"name"`
 	FullPath         string                 `json:"fullPath"`
@@ -373,7 +386,9 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 	log.Printf("Endpoint: /mgmt/tm/asm/policies")
 	log.Printf("Method: GET")
 	log.Printf("Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management")
+	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
 	log.Printf("Searching for policy with name: %s", policyName)
+	log.Printf("Using iControl REST API specification from F5 documentation")
 	if policyName == "" {
 		return nil, fmt.Errorf("policy name cannot be empty")
 	}
@@ -581,6 +596,54 @@ func (c *Client) GetPools() ([]Pool, map[string][]string, error) {
 	return poolList, poolMembers, nil
 }
 
+
+// GetPolicySignatureStatus retrieves signature status information for a specific WAF policy
+// Reference: iControl REST API Guide 14.1.0, Chapter 7: Application Security Management
+// Endpoint: /mgmt/tm/asm/policies/<policy_id>/signatures
+func (c *Client) GetPolicySignatureStatus(policyID string) ([]SignatureStatus, error) {
+	log.Printf("\n=== Starting GetPolicySignatureStatus Operation for policy ID: %s ===", policyID)
+	log.Printf("Endpoint: /mgmt/tm/asm/policies/%s/signatures", policyID)
+	log.Printf("Method: GET")
+	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
+
+	if policyID == "" {
+		return nil, fmt.Errorf("policy ID cannot be empty")
+	}
+
+	type SignatureResponse struct {
+		Items []SignatureStatus `json:"items"`
+	}
+
+	var signatures SignatureResponse
+	req := &bigip.APIRequest{
+		Method:      "GET",
+		URL:         fmt.Sprintf("mgmt/tm/asm/policies/%s/signatures", policyID),
+		ContentType: "application/json",
+	}
+
+	log.Printf("\nMaking API request to fetch signature status...")
+	resp, err := c.BigIP.APICall(req)
+	if err != nil {
+		log.Printf("Error fetching signature status: %v", err)
+		return nil, fmt.Errorf("failed to get signature status: %v", err)
+	}
+
+	if err = json.Unmarshal(resp, &signatures); err != nil {
+		log.Printf("Error parsing signature status response: %v", err)
+		return nil, fmt.Errorf("failed to parse signature status: %v", err)
+	}
+
+	log.Printf("\nFound %d signatures for policy", len(signatures.Items))
+	for i, sig := range signatures.Items {
+		log.Printf("Signature [%d]:", i+1)
+		log.Printf("  ID: %s", sig.SignatureID)
+		log.Printf("  Name: %s", sig.Name)
+		log.Printf("  Enabled: %v", sig.Enabled)
+		log.Printf("  Staging: %v", sig.Staging)
+	}
+
+	return signatures.Items, nil
+}
 func (c *Client) GetNodes() ([]Node, error) {
 	nodes, err := c.Nodes()
 	if err != nil {
