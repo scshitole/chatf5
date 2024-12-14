@@ -95,10 +95,10 @@ func NewClient(cfg *config.Config) (*Client, error) {
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			},
 		},
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		ExpectContinueTimeout: 5 * time.Second,
-		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   45 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+		ExpectContinueTimeout: 15 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
 		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
@@ -117,15 +117,22 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 	// Maximum number of retries
 	maxRetries := 3
-	retryDelay := 5 * time.Second
+	baseDelay := 5 * time.Second
+	maxDelay := 30 * time.Second
 
 	// Start connection test in a goroutine
 	go func() {
 		var lastErr error
 		for retry := 0; retry < maxRetries; retry++ {
 			if retry > 0 {
-				log.Printf("Retry attempt %d/%d after %v delay...", retry+1, maxRetries, retryDelay)
-				time.Sleep(retryDelay)
+				// Calculate exponential backoff delay
+				backoffMultiplier := uint(1) << uint(retry-1)
+				delay := baseDelay * time.Duration(backoffMultiplier)
+				if delay > maxDelay {
+					delay = maxDelay
+				}
+				log.Printf("Retry attempt %d/%d after %v delay (exponential backoff)...", retry+1, maxRetries, delay)
+				time.Sleep(delay)
 			}
 
 			// Try to fetch virtual servers as a connection test
@@ -212,14 +219,21 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 	log.Printf("Authentication: Basic Auth (Username: %s)", c.Username)
 
 	maxRetries := 3
-	retryDelay := 5 * time.Second
+	baseDelay := 5 * time.Second
+	maxDelay := 30 * time.Second
 	var lastErr error
 	var policies ASMPoliciesResponse
 
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
-			log.Printf("Retry attempt %d/%d for WAF policies after %v delay...", retry+1, maxRetries, retryDelay)
-			time.Sleep(retryDelay)
+			// Calculate exponential backoff delay
+			backoffMultiplier := uint(1) << uint(retry-1)
+			delay := baseDelay * time.Duration(backoffMultiplier)
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+			log.Printf("Retry attempt %d/%d for WAF policies after %v delay (exponential backoff)...", retry+1, maxRetries, delay)
+			time.Sleep(delay)
 		}
 
 		req := &bigip.APIRequest{
@@ -227,7 +241,10 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 			URL:         "mgmt/tm/asm/policies",
 			ContentType: "application/json",
 		}
+		
+		log.Printf("\nMaking API request to fetch WAF policies...")
 		resp, err := c.BigIP.APICall(req)
+		
 		if err == nil {
 			if err = json.Unmarshal(resp, &policies); err == nil {
 				log.Printf("\nAPI Response received and parsed successfully")
@@ -236,32 +253,44 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 				break
 			}
 			log.Printf("Error parsing WAF policies response: %v", err)
+			lastErr = fmt.Errorf("JSON parsing error: %v", err)
+			continue
 		}
+		
 		lastErr = err
-		if retry == maxRetries-1 && err != nil {
-			log.Printf("\nERROR: Failed to fetch WAF policies")
-			log.Printf("Error Type: %T", err)
-			log.Printf("Error Message: %v", err)
-			
-			errStr := err.Error()
-			switch {
-			case strings.Contains(strings.ToLower(errStr), "unauthorized"):
-				log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
-			case strings.Contains(strings.ToLower(errStr), "connection"):
-				log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
-				log.Printf("Please verify:\n1. Network connectivity\n2. BIG-IP management interface\n3. ASM module is provisioned and licensed")
-			case strings.Contains(strings.ToLower(errStr), "not found"):
-				log.Printf("Endpoint Error: WAF/ASM endpoint not found")
-				log.Printf("Please verify ASM module is provisioned on BIG-IP")
-			default:
-				log.Printf("Unhandled WAF error - Full error: %v", err)
-			}
-			
+		errStr := err.Error()
+		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
+		
+		// Determine if we should retry based on error type
+		shouldRetry := false
+		switch {
+		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
+			log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
+			// Don't retry auth errors
+		case strings.Contains(strings.ToLower(errStr), "connection"):
+			log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
+			log.Printf("Please verify:\n1. Network connectivity\n2. BIG-IP management interface\n3. ASM module is provisioned and licensed")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "timeout"):
+			log.Printf("Timeout Error: Request timed out")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "not found"):
+			log.Printf("Endpoint Error: WAF/ASM endpoint not found")
+			log.Printf("Please verify ASM module is provisioned on BIG-IP")
+			// Don't retry 404 errors
+		default:
+			log.Printf("Unhandled error type - Full error: %v", err)
+			shouldRetry = true
+		}
+		
+		if !shouldRetry || retry == maxRetries-1 {
 			return nil, fmt.Errorf("failed to get WAF policies: %v", lastErr)
 		}
 	}
 
 	var wafPolicies []*WAFPolicy
+	log.Printf("\nProcessing %d WAF policies...", len(policies.Items))
+	
 	for _, policy := range policies.Items {
 		log.Printf("\nProcessing policy:")
 		log.Printf("  Name: %s", policy.Name)
@@ -288,7 +317,7 @@ func (c *Client) GetWAFPolicies() ([]*WAFPolicy, error) {
 		wafPolicies = append(wafPolicies, wafPolicy)
 	}
 
-	log.Printf("\nFound %d WAF policies", len(wafPolicies))
+	log.Printf("\nFound and processed %d WAF policies successfully", len(wafPolicies))
 	return wafPolicies, nil
 }
 
@@ -298,20 +327,70 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 	log.Printf("Endpoint: /mgmt/tm/asm/policies")
 	log.Printf("Method: GET")
 
-	req := &bigip.APIRequest{
-		Method:      "GET",
-		URL:         fmt.Sprintf("mgmt/tm/asm/policies?$filter=name+eq+%s", policyName),
-		ContentType: "application/json",
-	}
-
-	resp, err := c.BigIP.APICall(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get WAF policy details: %v", err)
-	}
-
+	maxRetries := 3
+	baseDelay := 5 * time.Second
+	maxDelay := 30 * time.Second
+	var lastErr error
 	var policiesResp ASMPoliciesResponse
-	if err := json.Unmarshal(resp, &policiesResp); err != nil {
-		return nil, fmt.Errorf("failed to parse WAF policy details: %v", err)
+
+	for retry := 0; retry < maxRetries; retry++ {
+		if retry > 0 {
+			// Calculate exponential backoff delay
+			backoffMultiplier := uint(1) << uint(retry-1)
+			delay := baseDelay * time.Duration(backoffMultiplier)
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+			log.Printf("Retry attempt %d/%d after %v delay (exponential backoff)...", retry+1, maxRetries, delay)
+			time.Sleep(delay)
+		}
+
+		req := &bigip.APIRequest{
+			Method:      "GET",
+			URL:         fmt.Sprintf("mgmt/tm/asm/policies?$filter=name+eq+%s", policyName),
+			ContentType: "application/json",
+		}
+
+		log.Printf("\nMaking API request to fetch details for WAF policy: %s", policyName)
+		resp, err := c.BigIP.APICall(req)
+		
+		if err == nil {
+			if err = json.Unmarshal(resp, &policiesResp); err == nil {
+				log.Printf("\nAPI Response received and parsed successfully")
+				break
+			}
+			log.Printf("Error parsing WAF policy details response: %v", err)
+			lastErr = fmt.Errorf("JSON parsing error: %v", err)
+			continue
+		}
+		
+		lastErr = err
+		errStr := err.Error()
+		log.Printf("\nAPI request failed on attempt %d: %v", retry+1, err)
+		
+		// Determine if we should retry based on error type
+		shouldRetry := false
+		switch {
+		case strings.Contains(strings.ToLower(errStr), "unauthorized"):
+			log.Printf("Authentication Error: Please verify credentials and WAF module access permissions")
+			// Don't retry auth errors
+		case strings.Contains(strings.ToLower(errStr), "connection"):
+			log.Printf("Connection Error: Unable to reach BIG-IP WAF endpoint")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "timeout"):
+			log.Printf("Timeout Error: Request timed out")
+			shouldRetry = true
+		case strings.Contains(strings.ToLower(errStr), "not found"):
+			log.Printf("Endpoint Error: WAF/ASM endpoint or policy not found")
+			// Don't retry 404 errors
+		default:
+			log.Printf("Unhandled error type - Full error: %v", err)
+			shouldRetry = true
+		}
+		
+		if !shouldRetry || retry == maxRetries-1 {
+			return nil, fmt.Errorf("failed to get WAF policy details: %v", lastErr)
+		}
 	}
 
 	if len(policiesResp.Items) == 0 {
@@ -319,6 +398,11 @@ func (c *Client) GetWAFPolicyDetails(policyName string) (*WAFPolicy, error) {
 	}
 
 	policy := policiesResp.Items[0]
+	log.Printf("\nSuccessfully retrieved details for WAF policy: %s", policy.Name)
+	log.Printf("Policy ID: %s", policy.ID)
+	log.Printf("Type: %s", policy.Type)
+	log.Printf("Status: %s", map[bool]string{true: "Active", false: "Inactive"}[policy.Active])
+
 	return &WAFPolicy{
 		Name:             policy.Name,
 		FullPath:         policy.FullPath,
