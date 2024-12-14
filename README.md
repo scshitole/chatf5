@@ -23,41 +23,45 @@ A Go-based chat interface for F5 BIG-IP management using OpenAI LLM. This tool p
 
 ## Quick Start
 
-1. First, create a new repository on GitHub:
-   - Go to github.com
-   - Click "New Repository"
-   - Name it "f5-bigip-chat"
-   - Make it public
-   - Don't initialize with any files
-
-2. Clone and set up locally:
+1. Clone the repository:
 ```bash
-# Clone the repository
-git clone https://github.com/[your-username]/f5-bigip-chat.git
-cd f5-bigip-chat
-
-# If you're setting up a new repository:
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/[your-username]/f5-bigip-chat.git
-git push -u origin main
+git clone https://github.com/scshitole/chatf5.git
+cd chatf5
 ```
 
-## Environment Setup
-
-Set the following environment variables:
-
+2. Set up environment variables in your terminal:
 ```bash
 # BIG-IP Connection Details
-export BIGIP_HOST="xxx"     # Your BIG-IP host and port
-export BIGIP_USERNAME="admin"              # Your BIG-IP username
-export BIGIP_PASSWORD="xxx"         # Your BIG-IP password
+export BIGIP_HOST='<BIG-IP-HOSTNAME>:8443'
+export BIGIP_USERNAME='<BIG-IP-USERNAME>'
+export BIGIP_PASSWORD='<BIG-IP-PASSWORD>'
 
 # OpenAI API Configuration
-export OPENAI_API_KEY="your-openai-api-key"  # Your OpenAI API key
+export OPENAI_API_KEY='<OPENAI-API-KEY>'
 ```
+
+3. Install Go (if not already installed):
+```bash
+brew install go  # On macOS using Homebrew
+```
+
+4. Install dependencies and run:
+```bash
+go mod download
+go mod verify
+go run main.go
+```
+
+## Environment Variables
+
+The application requires the following environment variables:
+
+- `BIGIP_HOST`: The hostname/IP and port of your F5 BIG-IP instance
+- `BIGIP_USERNAME`: Your BIG-IP username
+- `BIGIP_PASSWORD`: Your BIG-IP password
+- `OPENAI_API_KEY`: Your OpenAI API key for natural language processing
+
+You can set these variables as shown in the Quick Start section above.
 
 ## Installation
 

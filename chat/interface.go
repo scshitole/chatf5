@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"f5chat/bigip"
@@ -29,7 +30,7 @@ func (i *Interface) ProcessQuery(query string) (string, error) {
 	}
 
 	// Execute the appropriate BIG-IP operation based on LLM response
-	response, err := i.executeOperation(llmResponse)
+	response, err := i.executeOperation(llmResponse, query)
 	if err != nil {
 		return "", fmt.Errorf("I understood your request about the BIG-IP configuration, but encountered an issue while fetching the information. Please try again. (Error: %v)", err)
 	}
@@ -47,9 +48,66 @@ func containsAny(text string, phrases []string) bool {
 	return false
 }
 
-func (i *Interface) executeOperation(llmResponse string) (string, error) {
+func (i *Interface) executeOperation(llmResponse string, originalQuery string) (string, error) {
 	// Enhanced intent detection with common variations
 	lowerResponse := strings.ToLower(llmResponse)
+
+	// WAF Policy related queries
+	if containsAny(lowerResponse, []string{
+		"waf", "web application firewall", 
+		"asm", "application security",
+		"security policy", "policies",
+		"protection", "web security",
+	}) {
+		log.Printf("Detected WAF policy query request: %s", originalQuery)
+		
+		// Check if looking for a specific policy details
+		if (strings.Contains(lowerResponse, "details") || 
+			strings.Contains(lowerResponse, "show") || 
+			strings.Contains(lowerResponse, "get")) && 
+			strings.Contains(lowerResponse, "policy") {
+			
+			log.Printf("Detected request for specific WAF policy details")
+			
+			// Extract policy name from the query
+			words := strings.Fields(lowerResponse)
+			var policyName string
+			for i, word := range words {
+				if (word == "policy" || word == "waf" || word == "asm") && i+1 < len(words) {
+					policyName = words[i+1]
+					if !strings.Contains(policyName, "details") && !strings.Contains(policyName, "policy") {
+						log.Printf("Found policy name in query: %s", policyName)
+						break
+					}
+				}
+			}
+			
+			if policyName != "" {
+				log.Printf("Attempting to fetch details for WAF policy: %s", policyName)
+				policy, err := i.bigipClient.GetWAFPolicyDetails(policyName)
+				if err != nil {
+					log.Printf("Error fetching WAF policy details: %v", err)
+					return "", fmt.Errorf("failed to fetch WAF policy details: %v", err)
+				}
+				log.Printf("Successfully retrieved WAF policy details for %s", policyName)
+				return utils.FormatWAFPolicyDetails(policy), nil
+			}
+		}
+		
+		// Default: list all policies
+		log.Printf("Fetching all WAF policies")
+		policies, err := i.bigipClient.GetWAFPolicies()
+		if err != nil {
+			log.Printf("Error fetching WAF policies: %v", err)
+			// Enhanced error message for users
+			if strings.Contains(err.Error(), "not found") {
+				return "", fmt.Errorf("WAF (Web Application Firewall) policies endpoint not found. Please ensure the ASM module is provisioned on your BIG-IP system")
+			}
+			return "", fmt.Errorf("Unable to fetch WAF policies. This could be due to:\n1. ASM module not being provisioned\n2. Insufficient permissions\n3. Network connectivity issues\n\nError details: %v", err)
+		}
+		log.Printf("Successfully retrieved %d WAF policies", len(policies))
+		return utils.FormatWAFPolicies(policies), nil
+	}
 
 	// Virtual Server related queries
 	if containsAny(lowerResponse, []string{"virtual server", "vip", "virtual ip", "virtual address"}) {

@@ -1,0 +1,79 @@
+go run main.go 
+2024/12/13 16:55:17 Attempting to connect to BIG-IP...
+2024/12/13 16:55:17 Raw BIG-IP host from environment: 54.214.73.31:8443
+2024/12/13 16:55:17 Parsed host components - Host: 54.214.73.31, Port: 8443
+2024/12/13 16:55:17 Constructed base URL: https://54.214.73.31:8443
+2024/12/13 16:55:17 Creating BIG-IP session with configuration: Address=https://54.214.73.31:8443, Username=admin
+2024/12/13 16:55:17 BIG-IP session created, attempting API connection...
+2024/12/13 16:55:17 Configuring TLS transport with custom settings...
+2024/12/13 16:55:17 Starting connection test to BIG-IP at 54.214.73.31
+2024/12/13 16:55:17 Using HTTPS connection to https://54.214.73.31:8443/mgmt/tm/ltm/virtual
+2024/12/13 16:55:17 Connection successful on attempt 1, found 3 virtual servers
+2024/12/13 16:55:17 Successfully connected to BIG-IP
+2024/12/13 16:55:17 Connection to BIG-IP established successfully
+2024/12/13 16:55:17 Successfully connected to BIG-IP
+2024/12/13 16:55:17 Initializing OpenAI client...
+2024/12/13 16:55:17 OpenAI client initialized successfully
+Welcome to F5 BIG-IP Chat Interface!
+Type 'exit' to quit
+----------------------------------------
+2024/12/13 16:55:17 Executing test command: show virtual servers
+2024/12/13 16:55:19 
+=== Starting GetVirtualServers Operation ===
+2024/12/13 16:55:19 Endpoint: /mgmt/tm/ltm/virtual
+2024/12/13 16:55:19 Method: GET
+2024/12/13 16:55:19 Authentication: Basic Auth (Username: admin)
+2024/12/13 16:55:19 
+Making API request to fetch virtual servers...
+2024/12/13 16:55:20 
+API Response received successfully
+2024/12/13 16:55:20 
+Found 3 virtual server(s)
+2024/12/13 16:55:20 
+Virtual Server [1/3]:
+2024/12/13 16:55:20   Name:        VS_WAF
+2024/12/13 16:55:20   Destination: /Common/10.1.1.101:443
+2024/12/13 16:55:20   Pool:        /Common/VS_WAF
+2024/12/13 16:55:20   Status:      Enabled
+2024/12/13 16:55:20 
+Virtual Server [2/3]:
+2024/12/13 16:55:20   Name:        Vsapp1
+2024/12/13 16:55:20   Destination: /Common/10.0.0.200:8080
+2024/12/13 16:55:20   Pool:        /Common/app1pool
+2024/12/13 16:55:20   Status:      Enabled
+2024/12/13 16:55:20 
+Virtual Server [3/3]:
+2024/12/13 16:55:20   Name:        vs_200_1_1_1_8080
+2024/12/13 16:55:20   Destination: /Common/200.1.1.1:8080
+2024/12/13 16:55:20   Pool:        
+2024/12/13 16:55:20   Status:      Enabled
+2024/12/13 16:55:20 GetVirtualServers operation completed. Returning 3 virtual servers
+2024/12/13 16:55:20 Test command successful, response length: 680
+
+BIG-IP: 
+=== Virtual Servers (VIPs) ===
+
+[1] Virtual Server Details:
+----------------------------------------
+Name:        VS_WAF
+Destination: /Common/10.1.1.101:443
+Pool:        /Common/VS_WAF
+Status:      Enabled
+----------------------------------------
+
+[2] Virtual Server Details:
+----------------------------------------
+Name:        Vsapp1
+Destination: /Common/10.0.0.200:8080
+Pool:        /Common/app1pool
+Status:      Enabled
+----------------------------------------
+
+[3] Virtual Server Details:
+----------------------------------------
+Name:        vs_200_1_1_1_8080
+Destination: /Common/200.1.1.1:8080
+Pool:        
+Status:      Enabled
+----------------------------------------
+
