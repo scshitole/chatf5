@@ -32,12 +32,12 @@ cd chatf5
 2. Set up environment variables in your terminal:
 ```bash
 # BIG-IP Connection Details
-export BIGIP_HOST='your-bigip-host:8443'
-export BIGIP_USERNAME='your-bigip-username'
-export BIGIP_PASSWORD='your-bigip-password'
+export BIGIP_HOST='<BIG-IP-HOSTNAME>:8443'
+export BIGIP_USERNAME='<BIG-IP-USERNAME>'
+export BIGIP_PASSWORD='<BIG-IP-PASSWORD>'
 
 # OpenAI API Configuration
-export OPENAI_API_KEY='your-openai-api-key'
+export OPENAI_API_KEY='<OPENAI-API-KEY>'
 ```
 
 3. Install Go (if not already installed):
