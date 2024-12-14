@@ -46,28 +46,27 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	bigipClient := bigip.NewSession(config)
 	log.Printf("BIG-IP session created, attempting API connection...")
 
-	// Set custom transport with TLS configuration matching successful curl command
+	// Set custom transport with enhanced TLS configuration for HTTPS
 	customTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // Required for self-signed cert
+			InsecureSkipVerify: true, // Required for self-signed certificates
 			MinVersion:         tls.VersionTLS12,
-			MaxVersion:         tls.VersionTLS12, // Force TLSv1.2 as seen in curl
 			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, // Match curl's cipher
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			},
 		},
-		// Timeouts and settings matching curl's successful connection
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		IdleConnTimeout:       10 * time.Second,
-		DisableCompression:    true,
-		DisableKeepAlives:     true, // Match curl's behavior
-		ForceAttemptHTTP2:     false, // Force HTTP/1.1 as seen in curl
+		// Enhanced connection settings
+		TLSHandshakeTimeout:   20 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
-		// Force direct connection without proxy
-		Proxy: nil,
+		ForceAttemptHTTP2:     false, // Stick to HTTP/1.1 for better compatibility
 	}
 
 	log.Printf("Configuring TLS transport with custom settings...")
@@ -75,123 +74,87 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 	// Test connection with timeout using a simple endpoint
 	log.Printf("Starting connection test to BIG-IP at %s", host)
-	log.Printf("Full connection URL: %s/mgmt/tm/ltm/virtual", baseURL)
-	log.Printf("Network config:")
-	log.Printf("- Direct connection (no proxy)")
-	log.Printf("- Allow reused connections: false")
-	log.Printf("- Keep-alive enabled: false")
-	log.Printf("- HTTP/1.1 enforced (HTTP/2 disabled)")
-	log.Printf("- Using TLSv1.2 with ECDHE-RSA-AES128-GCM-SHA256")
-	log.Printf("- Self-signed certificate handling: enabled")
-	log.Printf("Connection Details:")
-	log.Printf("- Protocol: HTTPS/TLS")
-	log.Printf("- TLS Version: 1.2 (forced)")
-	log.Printf("- Cipher Suite: ECDHE-RSA-AES128-GCM-SHA256")
-	log.Printf("- Certificate Verification: Disabled (allowing self-signed)")
-	log.Printf("- Auth Method: Basic Auth")
-	log.Printf("- Username: %s (length: %d)", cfg.BigIPUsername, len(cfg.BigIPUsername))
-	log.Printf("- Password length: %d characters", len(cfg.BigIPPassword))
+	log.Printf("Using HTTPS connection to %s/mgmt/tm/ltm/virtual", baseURL)
 
-	// Additional debug info
-	log.Printf("Network settings:")
-	log.Printf("1. Port: %s (management port)", port)
-	log.Printf("2. TLS config: TLSv1.2 only")
-	log.Printf("3. Cipher: ECDHE-RSA-AES128-GCM-SHA256")
-	log.Printf("4. Keep-alive: enabled")
-	log.Printf("5. Connection timeout: %v", customTransport.TLSHandshakeTimeout)
+	// Create a channel for connection result
+	connectionStatus := make(chan error, 1)
 
-	// Validate credentials
-	if cfg.BigIPUsername != "admin" || len(cfg.BigIPPassword) != 10 {
-		log.Printf("WARNING: Credential validation failed:")
-		log.Printf("- Expected username: 'admin', Got: '%s'", cfg.BigIPUsername)
-		log.Printf("- Expected password length: 10, Got: %d", len(cfg.BigIPPassword))
-	}
+	// Maximum number of retries
+	maxRetries := 3
+	retryDelay := 5 * time.Second
 
-	// Detailed TLS debug logging
-	log.Printf("TLS Configuration Details:")
-	log.Printf("- Min TLS Version: 1.2")
-	log.Printf("- Max TLS Version: 1.2")
-	log.Printf("- Allowed Cipher Suite: ECDHE-RSA-AES128-GCM-SHA256")
-	log.Printf("- Certificate Verification: Disabled for development")
-	log.Printf("- Target URL: %s", baseURL)
-
-	done := make(chan error, 1)
+	// Start connection test in a goroutine
 	go func() {
-		// Try a lightweight API call to test connectivity
-		log.Println("Attempting to fetch VirtualServers as connection test...")
-		vs, err := bigipClient.VirtualServers()
-		if err != nil {
-			log.Printf("Connection test API call failed with detailed error: %+v", err)
-			log.Printf("Error type: %T", err)
-			errLower := strings.ToLower(err.Error())
-
-			// Enhanced error classification with specific details
-			switch {
-			case strings.Contains(errLower, "certificate") || strings.Contains(errLower, "x509"):
-				log.Printf("TLS/Certificate error: The server's certificate could not be verified")
-				log.Printf("This is expected for self-signed certificates in development")
-				// Continue despite certificate error as we're using InsecureSkipVerify
-				vs, err = bigipClient.VirtualServers()
-				if err == nil {
-					log.Printf("Connection succeeded after ignoring certificate error")
-					done <- nil
-					return
-				}
-			case strings.Contains(errLower, "connection refused"):
-				log.Printf("Connection refused - double checking settings:")
-				log.Printf("1. Target: %s:%s (matching curl)", host, port)
-				log.Printf("2. TLS Version: 1.2 (forced)")
-				log.Printf("3. Cipher: ECDHE-RSA-AES128-GCM-SHA256")
-				log.Printf("4. Direct connection without proxy")
-			case strings.Contains(errLower, "timeout"):
-				log.Printf("Connection timeout - verifying network:")
-				log.Printf("1. URL: %s/mgmt/tm/ltm/virtual", baseURL)
-				log.Printf("2. Timeouts: TLS=%ds, Response=%ds",
-					int(customTransport.TLSHandshakeTimeout.Seconds()),
-					int(customTransport.ResponseHeaderTimeout.Seconds()))
-			case strings.Contains(errLower, "unauthorized") ||
-				strings.Contains(errLower, "authentication") ||
-				strings.Contains(errLower, "401"):
-				log.Printf("Authentication failed - verifying:")
-				log.Printf("1. Username: %s (expected: admin)", cfg.BigIPUsername)
-				log.Printf("2. Password length: %d (expected: 10)", len(cfg.BigIPPassword))
-			default:
-				log.Printf("Unexpected error type: %v", err)
-				log.Printf("Full error context: %#v", err)
+		var lastErr error
+		for retry := 0; retry < maxRetries; retry++ {
+			if retry > 0 {
+				log.Printf("Retry attempt %d/%d after %v delay...", retry+1, maxRetries, retryDelay)
+				time.Sleep(retryDelay)
 			}
 
-			done <- fmt.Errorf("connection test failed: %v", err)
-			return
+			// Try to fetch virtual servers as a connection test
+			testVs, testErr := bigipClient.VirtualServers()
+			if testErr == nil {
+				log.Printf("Connection successful on attempt %d, found %d virtual servers", retry+1, len(testVs.VirtualServers))
+				connectionStatus <- nil
+				return
+			}
+
+			lastErr = testErr
+			errLower := strings.ToLower(testErr.Error())
+			log.Printf("Connection attempt %d failed: %v", retry+1, testErr)
+
+			// Handle different error cases
+			switch {
+			case strings.Contains(errLower, "certificate"):
+				log.Printf("Certificate validation error - modifying TLS config and retrying...")
+				bigipClient.Transport = customTransport
+				// Immediate retry with new transport
+				retryVs, retryErr := bigipClient.VirtualServers()
+				if retryErr == nil {
+					log.Printf("Connection successful after certificate handling, found %d virtual servers", len(retryVs.VirtualServers))
+					connectionStatus <- nil
+					return
+				}
+				log.Printf("Still failed after certificate handling: %v", retryErr)
+				
+			case strings.Contains(errLower, "connection refused"):
+				log.Printf("Connection refused - port %s might be blocked or BIG-IP not accepting connections", port)
+				log.Printf("Please verify:\n1. BIG-IP management port is accessible\n2. No firewall rules blocking port %s", port)
+				
+			case strings.Contains(errLower, "no such host"):
+				log.Printf("DNS resolution failed for host: %s\nPlease verify the hostname/IP is correct", host)
+				
+			case strings.Contains(errLower, "timeout"):
+				log.Printf("Connection timed out - possible network issues:\n1. Slow network connection\n2. Firewall blocking traffic\n3. BIG-IP high load or not responding")
+				
+			case strings.Contains(errLower, "unauthorized"):
+				log.Printf("Authentication failed - verify credentials:\n1. Username (current: %s)\n2. Password (length: %d)\n3. BIG-IP user permissions", 
+					cfg.BigIPUsername, len(cfg.BigIPPassword))
+				
+			default:
+				log.Printf("Unexpected error: %v\nFull error details: %#v", testErr, testErr)
+			}
 		}
 
-		// Log successful connection
-		log.Printf("Successfully connected to BIG-IP!")
-		log.Printf("Found %d virtual servers", len(vs.VirtualServers))
-		log.Printf("Connection test passed - API responding correctly")
-		done <- nil
+		// If we get here, all retries failed
+		connectionStatus <- fmt.Errorf("failed to connect after %d attempts - last error: %v", maxRetries, lastErr)
 	}()
 
 	// Wait for connection test with timeout
 	select {
-	case err := <-done:
+	case err := <-connectionStatus:
 		if err != nil {
-			log.Printf("Connection test failed: %v", err)
+			log.Printf("All connection attempts failed: %v", err)
 			return nil, fmt.Errorf("failed to connect to BIG-IP: %v", err)
 		}
-		log.Println("Successfully connected to BIG-IP")
+		log.Printf("Successfully connected to BIG-IP")
 	case <-time.After(30 * time.Second):
-		log.Printf("Connection attempt timed out after 30 seconds")
-		log.Printf("Detailed Connection Information:")
-		log.Printf("- Target Host: %s", host)
-		log.Printf("- Management Port: 8443")
-		log.Printf("- TLS Version: 1.2/1.3")
-		log.Printf("- Certificate Verification: Disabled (allowing self-signed)")
-		log.Printf("- Connection Timeouts:")
-		log.Printf("  * TLS Handshake: 10s")
-		log.Printf("  * Response Header: 10s")
-		log.Printf("  * Total Connection: 30s")
-		return nil, fmt.Errorf("connection timeout - since browser access works, this might be a TLS handshake issue. Please verify:\n1. HTTPS/TLS connectivity\n2. Certificate handling\n3. BIG-IP API endpoint status")
+		return nil, fmt.Errorf("connection timeout after 30 seconds - please verify:\n1. BIG-IP host and port (%s)\n2. Network connectivity\n3. Firewall rules", cfg.BigIPHost)
 	}
+
+	// The first connection test was successful, no need for a second test
+	log.Println("Connection to BIG-IP established successfully")
 
 	return &Client{bigipClient}, nil
 }
